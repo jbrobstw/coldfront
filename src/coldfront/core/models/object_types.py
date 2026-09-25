@@ -10,7 +10,6 @@ from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ObjectDoesNotExist
 from django.db import models
 from django.db.models import ManyToOneRel, Q
-from django.db.models.fields.json import KT
 from django.utils.translation import gettext as _
 
 from coldfront.constants import CORE_APPS
@@ -162,7 +161,7 @@ class ObjectTypeManager(models.Manager):
             raise KeyError(
                 f"{feature} is not a registered model feature! Valid features are: {registry['model_features'].keys()}"
             )
-        return self.get_queryset().annotate(feature=KT(f"features__{feature}")).filter(feature="true")
+        return self.get_queryset().filter(**{f"features__{feature}": True})
 
 
 class ObjectType(ContentType):
