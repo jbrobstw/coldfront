@@ -643,17 +643,51 @@ def _sync_cluster(client: SlurmClient, cluster: SlurmCluster) -> SyncReport:
         report.duration_ms = 0
         return report
 
-    _prime_remote_entities_for_config(client, cluster, config, report)
+    # ---- Step 2: Upsert via dedicated endpoints ----
+    #
+    # Older/newer slurmrestd builds have proven much more reliable when we
+    # send explicit collection payloads to /accounts/, /users/, and
+    # /associations/ than when we POST the whole synthetic /config payload in
+    # one shot.  In particular, /config can partially parse association data,
+    # emit warnings like "ignored field [fairshare] in DATA_PARSER_ASSOC", and
+    # still return success, which leaves users/groups created but associations
+    # missing.  Using the dedicated endpoints also lets us account for each
+    # object individually and tolerate "already exists" conflicts per record.
+    for account_payload in config.get("accounts", []):
+        try:
+            client.create_accounts([account_payload])
+            report.accounts_created += 1
+        except SlurmAlreadyExistsException:
+            # Desired state already exists; treat as converged.
+            report.accounts_created += 1
+        except Exception as exc:
+            report.errors.append(f"Failed to upsert account '{account_payload.get('name', '')}': {exc}")
 
-    # ---- Step 2: Upsert via POST /config ----
-    try:
-        resp = client.upsert_config(config)
-        report.accounts_created = len(config.get("accounts", []))
-        report.associations_created = len(config.get("associations", []))
-        report.users_created = len(config.get("users", []))
-        report.warnings.extend(resp.get("warnings", []))
-    except Exception as exc:
-        report.errors.append(f"Config upsert failed: {exc}")
+    for user_payload in config.get("users", []):
+        try:
+            client.create_users([user_payload])
+            report.users_created += 1
+        except SlurmAlreadyExistsException:
+            report.users_updated += 1
+        except Exception as exc:
+            report.errors.append(f"Failed to upsert user '{user_payload.get('name', '')}': {exc}")
+
+    for assoc_payload in config.get("associations", []):
+        try:
+            client.create_associations([assoc_payload])
+            report.associations_created += 1
+        except SlurmAlreadyExistsException:
+            report.associations_updated += 1
+        except Exception as exc:
+            report.errors.append(
+                "Failed to upsert association "
+                f"(account={assoc_payload.get('account', '')}, "
+                f"user={assoc_payload.get('user', '')}, "
+                f"cluster={assoc_payload.get('cluster', '')}, "
+                f"partition={assoc_payload.get('partition', '')}): {exc}"
+            )
+
+    if report.errors:
         report.duration_ms = int((timezone.now() - start).total_seconds() * 1000)
         return report
 
@@ -1131,63 +1165,6 @@ def _build_account_assoc_payload(
         "partition": "",
         "grptresmins": {"billing": account.service_units * 60},
     }
-
-
-def _prime_remote_entities_for_config(
-    client: SlurmClient,
-    cluster: SlurmCluster,
-    config: dict[str, Any],
-    report: SyncReport,
-) -> None:
-    """Prime remote accounts and first-time users before full config upsert.
-
-    ``POST /config`` remains the authoritative full-sync operation, but some
-    sites can hit a convergence gap when an association references a user that
-    does not yet exist in slurmdbd. Prime the referenced accounts first, then
-    create any missing users through Slurm's dedicated ``users`` endpoint.
-
-    We intentionally do *not* use ``/users_association`` here. On affected
-    sites that path can emit parser warnings about association fields being
-    ignored (for example ``fairshare``, ``defaultqos``, and ``parent``) while
-    also logging cluster-cache noise in slurmdbd. For this pre-seed step we
-    only need the remote user row to exist; the subsequent ``POST /config``
-    call still converges the authoritative association/default/QOS state.
-    """
-    account_payloads = config.get("accounts", [])
-    if account_payloads:
-        try:
-            client.create_accounts_with_conflict_ok(account_payloads)
-        except Exception as exc:
-            report.errors.append(f"Failed to prime accounts before config upsert: {exc}")
-            return
-
-    user_payloads = config.get("users", [])
-    if not user_payloads:
-        return
-
-    try:
-        existing = client.get_users(with_assocs=False)
-    except Exception as exc:
-        report.errors.append(f"Failed to query existing Slurm users before config upsert: {exc}")
-        return
-
-    existing_usernames = {
-        user.get("name", "")
-        for user in existing.get("users", [])
-        if user.get("name")
-    }
-
-    for user_payload in user_payloads:
-        username = user_payload.get("name", "")
-        if not username or username in existing_usernames:
-            continue
-
-        try:
-            client.create_users([user_payload])
-        except SlurmAlreadyExistsException:
-            continue
-        except Exception as exc:
-            report.errors.append(f"Failed to prime Slurm user '{username}' before config upsert: {exc}")
 
 
 def _sync_association_qos(

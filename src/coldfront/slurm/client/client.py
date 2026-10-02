@@ -238,6 +238,27 @@ class SlurmClient:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _collection_body(field_name: str, records: list[dict[str, Any]] | dict[str, Any]) -> dict[str, Any]:
+        """Normalize collection-style write payloads for slurmrestd.
+
+        The Slurm REST write endpoints expect a top-level JSON object, not a
+        bare array.  ColdFront historically passed lists directly for endpoints
+        like ``POST /accounts/`` and ``POST /associations/``, which triggers
+        parser errors such as ``Data parser expected a dictionary or object``.
+
+        Accept either:
+        - a bare list of record dicts, or
+        - an already-wrapped payload dict
+
+        and always return ``{field_name: [...]}``.
+        """
+        if isinstance(records, dict):
+            if field_name in records:
+                return records
+            return {field_name: [records]}
+        return {field_name: records}
+
+    @staticmethod
     def serialize_account(
         name: str,
         description: str | None = None,
@@ -840,7 +861,7 @@ class SlurmClient:
         """
         url = self._slurmdb_path("accounts/")
         logger.info("Creating %d Slurm accounts", len(accounts))
-        return self._request("POST", url, json_body=accounts)
+        return self._request("POST", url, json_body=self._collection_body("accounts", accounts))
 
     def create_accounts_with_conflict_ok(
         self,
@@ -970,7 +991,7 @@ class SlurmClient:
         """
         url = self._slurmdb_path("qos/")
         logger.info("Upserting %d QOS definitions", len(qos_list))
-        return self._request("POST", url, json_body=qos_list)
+        return self._request("POST", url, json_body=self._collection_body("qos", qos_list))
 
     # ------------------------------------------------------------------
     # Partition endpoints (slurmctld)
@@ -1045,7 +1066,7 @@ class SlurmClient:
         """
         url = self._slurmdb_path("associations/")
         logger.info("Creating %d Slurm associations", len(associations))
-        return self._request("POST", url, json_body=associations)
+        return self._request("POST", url, json_body=self._collection_body("associations", associations))
 
     def create_associations_with_conflict_ok(
         self,
@@ -1170,7 +1191,7 @@ class SlurmClient:
         """
         url = self._slurmdb_path("users/")
         logger.info("Creating %d Slurm users", len(users))
-        return self._request("POST", url, json_body=users)
+        return self._request("POST", url, json_body=self._collection_body("users", users))
 
     def get_users(
         self,
