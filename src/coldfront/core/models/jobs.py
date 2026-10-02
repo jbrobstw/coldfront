@@ -503,6 +503,7 @@ class Job(models.Model):
     def enqueue(
         cls,
         func,
+        *task_args,
         instance=None,
         name="",
         user=None,
@@ -511,6 +512,7 @@ class Job(models.Model):
         immediate=False,
         queue_name=None,
         notifications=None,
+        priority=DEFAULT_TASK_PRIORITY,
         **kwargs,
     ):
         """
@@ -552,13 +554,14 @@ class Job(models.Model):
             user=user,
             job_id=uuid.uuid4(),
             queue_name=queue_name or "default",
+            priority=priority,
             notifications=notifications if notifications is not None else JobNotificationChoices.NOTIFICATION_ALWAYS,
         )
         job.full_clean()
         job.save()
 
         if immediate:
-            func(job_id=str(job.job_id), job=job, **kwargs)
+            func(*task_args, job_id=str(job.job_id), job=job, **kwargs)
         else:
             # Enqueue via Django Tasks (``Task.enqueue()``). The ``ColdFrontBackend``
             # handles the actual queueing and updates ``job.job_id`` to match the
@@ -594,7 +597,7 @@ class Job(models.Model):
 
             t = Task(
                 func=task_func,
-                priority=0,
+                priority=priority,
                 backend="default",
                 queue_name=queue_name or "default",
                 run_after=schedule_at,
@@ -602,7 +605,7 @@ class Job(models.Model):
             # Pass the pre-created Job as ``_coldfront_job`` so the
             # ColdFrontBackend can update its job_id rather than creating a
             # duplicate Job record.
-            t.enqueue(_coldfront_job=job, **kwargs)
+            t.enqueue(*task_args, _coldfront_job=job, **kwargs)
             # The ColdFrontBackend already updated job.job_id; refresh the
             # instance from the DB to ensure we have the current value.
             job.refresh_from_db()
