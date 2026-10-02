@@ -204,10 +204,9 @@ def enqueue_activate_allocation(allocation_id: int, cluster_id: int | None = Non
     logger.info("Enqueuing Slurm activate for allocation %s", allocation_id)
     Job.enqueue(
         "coldfront.slurm.sync._run_activate_allocation",
-        args=(),
-        kwargs={"allocation_id": allocation_id},
-        priority=3,
         name=f"SlurmActivate:allocation-{allocation_id}",
+        priority=3,
+        allocation_id=allocation_id,
     )
 
 
@@ -230,10 +229,9 @@ def enqueue_deactivate_allocation(allocation_id: int, cluster_id: int | None = N
     logger.info("Enqueuing Slurm deactivate for allocation %s", allocation_id)
     Job.enqueue(
         "coldfront.slurm.sync._run_deactivate_allocation",
-        args=(),
-        kwargs={"allocation_id": allocation_id},
-        priority=3,
         name=f"SlurmDeactivate:allocation-{allocation_id}",
+        priority=3,
+        allocation_id=allocation_id,
     )
 
 
@@ -276,13 +274,10 @@ def enqueue_remove_project_user(project_id: int, user_id: int, cluster_ids: list
     )
     Job.enqueue(
         "coldfront.slurm.sync._run_remove_project_user",
-        args=(),
-        kwargs={
-            "project_id": project_id,
-            "user_id": user_id,
-        },
-        priority=3,
         name=f"SlurmRemoveProjectUser:project-{project_id}:user-{user_id}",
+        priority=3,
+        project_id=project_id,
+        user_id=user_id,
     )
 
 

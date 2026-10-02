@@ -92,13 +92,10 @@ def enqueue_activate_allocation(allocation_id: int, cluster_id: int, share_type:
     Job.enqueue(
         "coldfront.storage.sync._run_activate_allocation",
         name=f"StorageActivate:allocation-{allocation_id}:cluster-{cluster_id}",
-        args=(),
-        kwargs={
-            "allocation_id": allocation_id,
-            "cluster_id": cluster_id,
-            "share_type": share_type,
-        },
         priority=3,
+        allocation_id=allocation_id,
+        cluster_id=cluster_id,
+        share_type=share_type,
     )
 
 
@@ -131,12 +128,9 @@ def enqueue_deactivate_allocation(allocation_id: int, cluster_id: int) -> None:
     Job.enqueue(
         "coldfront.storage.sync._run_deactivate_allocation",
         name=f"StorageDeactivate:allocation-{allocation_id}:cluster-{cluster_id}",
-        args=(),
-        kwargs={
-            "allocation_id": allocation_id,
-            "cluster_id": cluster_id,
-        },
         priority=3,
+        allocation_id=allocation_id,
+        cluster_id=cluster_id,
     )
 
 
