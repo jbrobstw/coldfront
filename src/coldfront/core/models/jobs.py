@@ -5,7 +5,7 @@
 import inspect
 import logging
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime
 
 import django_rq
@@ -111,6 +111,23 @@ class JobQuerySet(RestrictedQuerySet):
         or errored).
         """
         return self.filter(status__in=JobStatusChoices.TERMINAL_STATE_CHOICES)
+
+
+def _normalize_job_result(value):
+    """
+    Convert task return values to JSON-safe structures for ``Job.data``.
+
+    Background tasks sometimes return dataclass instances (for example
+    ``SyncReport`` from the Slurm/storage sync code). ``JSONField`` cannot
+    serialize those objects directly, so normalize them before assignment.
+    """
+    if is_dataclass(value):
+        return asdict(value)
+    if isinstance(value, dict):
+        return {k: _normalize_job_result(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_normalize_job_result(v) for v in value]
+    return value
 
 
 class Job(models.Model):
@@ -403,7 +420,7 @@ class Job(models.Model):
         """
         self.status = JobStatusChoices.STATUS_COMPLETED
         self.completed = timezone.now()
-        self.data = return_value
+        self.data = _normalize_job_result(return_value)
         self.error = ""
         self.save(update_fields=["status", "completed", "data", "error"])
 
