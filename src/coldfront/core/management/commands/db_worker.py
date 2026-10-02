@@ -12,6 +12,7 @@ import time
 from argparse import ArgumentTypeError, BooleanOptionalAction
 
 from django.conf import settings
+from django.db import transaction
 from django.core.management.base import BaseCommand
 from django.db import close_old_connections
 from django.db.utils import OperationalError
@@ -126,6 +127,7 @@ class Worker:
         while self.running:
             close_old_connections()
 
+            job = None
             jobs = Job.objects.ready()
             if not self.process_all_queues:
                 jobs = jobs.filter(queue_name__in=self.queue_names)
@@ -133,7 +135,13 @@ class Worker:
                 jobs = jobs.exclude(queue_name__in=self.excluded_queue_names)
 
             try:
-                job = jobs.get_locked()
+                # Lock and claim the job inside a single transaction so
+                # select_for_update() runs under transaction.atomic() and the
+                # claim is committed before processing starts.
+                with transaction.atomic():
+                    job = jobs.get_locked()
+                    if job is not None:
+                        job.claim(self.worker_id)
             except OperationalError as e:
                 if "is locked" in e.args[0]:
                     job = None
@@ -172,7 +180,6 @@ class Worker:
 
             backend_type = type(task.get_backend())
 
-            job.claim(self.worker_id)
             task_started.send(sender=backend_type, task_result=task_result)
 
             # If the task is a ``JobRunner`` bound method, reconstruct the
