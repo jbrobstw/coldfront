@@ -37,6 +37,12 @@ class AllocationFilterSet(AttributeFilterSetMixin, TenancyFilterSet, PrimaryMode
         lookup_expr="lte",
         label=_("End date (on or before)"),
     )
+    auto_expire = django_filters.BooleanFilter(
+        label=_("Auto expire"),
+    )
+    expiration_grace_days = django_filters.NumberFilter(
+        label=_("Expiration grace days"),
+    )
 
     class Meta:
         model = Allocation
@@ -49,7 +55,17 @@ class AllocationFilterSet(AttributeFilterSetMixin, TenancyFilterSet, PrimaryMode
             "resource_object_type_id",
             "start_date",
             "end_date",
+            "auto_expire",
+            "expiration_grace_days",
         )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        user = getattr(getattr(self, "request", None), "user", None)
+        if not (user and user.is_authenticated and user.is_superuser):
+            self.filters.pop("auto_expire", None)
+            self.filters.pop("expiration_grace_days", None)
 
     def search(self, queryset, name, value):
         if not value.strip():

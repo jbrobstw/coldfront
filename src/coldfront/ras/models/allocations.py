@@ -62,6 +62,21 @@ class Allocation(CommentingMixin, PrimaryModel):
         blank=True,
         null=True,
     )
+    auto_expire = models.BooleanField(
+        verbose_name=_("auto expire"),
+        default=True,
+        help_text=_(
+            "Automatically expire this allocation after end_date plus any grace period."
+        ),
+    )
+    expiration_grace_days = models.PositiveIntegerField(
+        verbose_name=_("expiration grace days"),
+        blank=True,
+        null=True,
+        help_text=_(
+            "Optional override for the number of days after end_date before this allocation is auto-expired."
+        ),
+    )
     justification = models.TextField(
         verbose_name=_("justification"),
         blank=True,

@@ -65,6 +65,18 @@ ALLOCATION_EXTENSION_CHANGEABLE_FIELDS = ENV.dict(
     cast={"value": tuple},
     default={},
 )
+# Number of days after an Allocation's end_date before it will be
+# auto-expired by the periodic RAS expiration job. Individual allocations may
+# override this value via Allocation.expiration_grace_days.
+ALLOCATION_AUTO_EXPIRATION_GRACE_DAYS = ENV.int(
+    "ALLOCATION_AUTO_EXPIRATION_GRACE_DAYS",
+    default=0,
+)
+
+# Interval (in minutes) for the periodic auto-expiration job that moves
+# allocations from ACTIVE -> EXPIRED once their end_date plus grace period has
+# passed.
+ALLOCATION_AUTO_EXPIRATION_JOB_INTERVAL = ENV.int("ALLOCATION_AUTO_EXPIRATION_JOB_INTERVAL", default=1440)
 FIELD_CHOICES = ENV.dict("FIELD_CHOICES", cast={"value": parse_choices_from_env}, default={})
 AUTO_SLUG_FUNC = ENV.str("AUTO_SLUG_FUNC", default="coldfront.models.utils.auto_generate_slug")
 # ------------------------------------------------------------------------------

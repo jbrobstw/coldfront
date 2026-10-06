@@ -41,6 +41,8 @@ class AllocationSerializer(CustomAttributeModelSerializer, PrimaryModelSerialize
             "resource_object_id",
             "start_date",
             "end_date",
+            "auto_expire",
+            "expiration_grace_days",
             "tags",
             "custom_fields",
             "created",
@@ -61,3 +63,14 @@ class AllocationSerializer(CustomAttributeModelSerializer, PrimaryModelSerialize
             "type": f"{ct.app_label}.{ct.model}" if ct else None,
             "display": str(resource),
         }
+
+    def get_fields(self):
+        fields = super().get_fields()
+
+        request = self.context.get("request")
+        user = getattr(request, "user", None)
+        if not (user and user.is_authenticated and user.is_superuser):
+            fields.pop("auto_expire", None)
+            fields.pop("expiration_grace_days", None)
+
+        return fields

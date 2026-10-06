@@ -9,6 +9,9 @@ from django.utils import timezone
 
 from coldfront.core.jobs.registry import system_job
 from coldfront.core.jobs.runner import JobRunner
+from coldfront.ras.choices import AllocationStatusChoices
+from coldfront.ras.flows import AllocationStatusFlow
+from coldfront.ras.models import Allocation
 from coldfront.ras.models import ProjectInvite
 
 
@@ -56,4 +59,46 @@ class PruneProjectInviteJob(JobRunner):
                 retention,
             )
 
+        return True
+
+
+@system_job(interval=getattr(settings, "ALLOCATION_AUTO_EXPIRATION_JOB_INTERVAL", 1440))
+class ExpireAllocationsJob(JobRunner):
+    """
+    Periodically expire ACTIVE allocations whose end_date plus grace period has
+    passed.
+
+    Auto-expiry is controlled per-allocation by ``Allocation.auto_expire`` and
+    the effective grace period comes from ``Allocation.expiration_grace_days``
+    or the global ``ALLOCATION_AUTO_EXPIRATION_GRACE_DAYS`` setting.
+    """
+
+    class Meta:
+        name = "coldfront.ras.jobs.ExpireAllocationsJob"
+
+    def run(self, *_args, **_kwargs):
+        now = timezone.now()
+        global_grace = getattr(settings, "ALLOCATION_AUTO_EXPIRATION_GRACE_DAYS", 0)
+
+        queryset = Allocation.objects.filter(
+            status=AllocationStatusChoices.STATUS_ACTIVE,
+            auto_expire=True,
+            end_date__isnull=False,
+        )
+
+        expired = 0
+        for allocation in queryset.iterator():
+            grace_days = allocation.expiration_grace_days
+            if grace_days is None:
+                grace_days = global_grace
+
+            if allocation.end_date + timedelta(days=grace_days) > now:
+                continue
+
+            flow = AllocationStatusFlow(allocation)
+            if flow.expire.can_proceed():
+                flow.expire()
+                expired += 1
+
+        self.logger.info("Expired %s allocation(s)", expired)
         return True

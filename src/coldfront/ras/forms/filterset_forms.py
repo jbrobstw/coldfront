@@ -6,6 +6,8 @@ from crispy_forms.layout import Fieldset
 from django import forms
 from django.utils.translation import gettext_lazy as _
 
+from coldfront.constants import BOOLEAN_WITH_BLANK_CHOICES
+from coldfront.context import current_request
 from coldfront.core.choices import ColorChoices
 from coldfront.core.models import ObjectType
 from coldfront.forms import OrganizationalModelFilterSetForm, PrimaryModelFilterSetForm
@@ -141,25 +143,44 @@ class AllocationFilterSetForm(TenancyFilterSetForm, PrimaryModelFilterSetForm):
         required=False,
         label=_("End date (on or before)"),
     )
+    auto_expire = forms.NullBooleanField(
+        label=_("Auto expire"),
+        required=False,
+        widget=forms.Select(choices=BOOLEAN_WITH_BLANK_CHOICES),
+    )
+    expiration_grace_days = forms.IntegerField(
+        required=False,
+        min_value=0,
+        label=_("Expiration grace days"),
+    )
     tag = TagFilterField(model)
 
-    fieldsets = (
-        Fieldset(
-            _("Allocation"),
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        request = current_request.get()
+        user = getattr(request, "user", None)
+        self._show_expiration_controls = bool(user and user.is_authenticated and user.is_superuser)
+        if not self._show_expiration_controls:
+            self.fields.pop("auto_expire", None)
+            self.fields.pop("expiration_grace_days", None)
+
+    @property
+    def fieldsets(self):
+        fields = [
             "project_id",
             "resource_object_type_id",
             "status",
             "owner",
             Date("start_date"),
-            Date("end_date"),
-            "tag",
-        ),
-        Fieldset(
-            _("Tenant"),
-            "tenant_group_id",
-            "tenant_id",
-        ),
-    )
+        ]
+        if self._show_expiration_controls:
+            fields.extend(["auto_expire", "expiration_grace_days"])
+        fields.extend([Date("end_date"), "tag"])
+        return (
+            Fieldset(_("Allocation"), *fields),
+            Fieldset(_("Tenant"), "tenant_group_id", "tenant_id"),
+        )
 
 
 class AllocationChangeRequestFilterSetForm(PrimaryModelFilterSetForm):
