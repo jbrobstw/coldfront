@@ -12,9 +12,8 @@ import time
 from argparse import ArgumentTypeError, BooleanOptionalAction
 
 from django.conf import settings
-from django.db import transaction
 from django.core.management.base import BaseCommand
-from django.db import close_old_connections
+from django.db import close_old_connections, transaction
 from django.db.utils import OperationalError
 from django.utils.autoreload import DJANGO_AUTORELOAD_ENV, run_with_reloader
 from django_tasks import DEFAULT_TASK_QUEUE_NAME, task_backends

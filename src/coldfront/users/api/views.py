@@ -5,9 +5,11 @@
 
 import logging
 
+from django.conf import settings
 from django.db.models import Count
 from drf_spectacular.types import OpenApiTypes
 from drf_spectacular.utils import extend_schema
+from rest_framework.generics import GenericAPIView
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.routers import APIRootView
@@ -15,8 +17,10 @@ from rest_framework.status import HTTP_201_CREATED
 from rest_framework.views import APIView
 from rest_framework.viewsets import ViewSet
 
+from coldfront.api.paginator import OptionalLimitOffsetPagination
 from coldfront.api.viewsets import ColdFrontModelViewSet
 from coldfront.users import filtersets
+from coldfront.users.directory import directory_search_users, serialize_candidate
 from coldfront.users.models import Group, ObjectPermission, Role, Token, User, UserConfig
 from coldfront.users.querysets import RestrictedQuerySet
 from coldfront.utils.data import deepmerge
@@ -31,6 +35,32 @@ class UsersRootView(APIRootView):
 
     def get_view_name(self):
         return "Users"
+
+
+class UserCandidateSearchView(GenericAPIView):
+    """
+    Search local users plus any configured external directory providers.
+
+    The response shape matches what ColdFront's dynamic select widgets need:
+    ``id`` for the submitted value and ``display`` for the rendered label.
+    """
+
+    permission_classes = [IsAuthenticated]
+    pagination_class = OptionalLimitOffsetPagination
+    _ignore_model_permissions = True
+
+    @extend_schema(responses={200: OpenApiTypes.OBJECT})
+    def get(self, request):
+        query = (request.GET.get("q") or "").strip()
+        limit = getattr(settings, "DIRECTORY_USER_SEARCH_LIMIT", 20)
+        candidates = directory_search_users(query, limit=limit, request=request)
+        data = [serialize_candidate(candidate) for candidate in candidates]
+
+        page = self.paginate_queryset(data)
+        if page is not None:
+            return self.get_paginated_response(page)
+
+        return Response(data)
 
 
 #

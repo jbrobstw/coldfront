@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from crispy_forms.layout import Fieldset
+from django import forms
 from django.core.exceptions import ObjectDoesNotExist
+from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
 
 from coldfront.forms import (
@@ -13,8 +15,16 @@ from coldfront.forms import (
     TenancyForm,
     TenancyImportForm,
 )
-from coldfront.forms.fields import CSVModelChoiceField, DynamicModelChoiceField
+from coldfront.forms.fields import CSVModelChoiceField
+from coldfront.forms.widgets import APISelectWidget
 from coldfront.ras.models import Project, ProjectUser
+from coldfront.users.directory import (
+    candidate_label_from_token,
+    directory_get_user,
+    provision_local_user_from_candidate,
+    resolve_user_from_candidate_token,
+    user_to_candidate_token,
+)
 from coldfront.users.models import Group, User
 from coldfront.utils.forms import get_field_value
 
@@ -54,16 +64,11 @@ class ProjectForm(TenancyForm, OrganizationalModelForm):
 
 
 class ProjectUserForm(PrimaryModelForm):
-    user = DynamicModelChoiceField(
+    user = forms.ChoiceField(
         label=_("User"),
-        queryset=User.objects.all(),
         required=True,
-        selector=True,
-        context={
-            "label": "username",
-            "title": "Username,First Name,Last Name,Email",
-            "extra-columns": "first_name,last_name,email",
-        },
+        widget=APISelectWidget(),
+        help_text=_("Search local users and any enabled directory providers."),
     )
 
     class Meta:
@@ -83,12 +88,37 @@ class ProjectUserForm(PrimaryModelForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.fields["user"].widget.attrs["data-url"] = reverse("users-api:user-candidates")
+        self._seed_user_choices()
+
         if project_id := get_field_value(self, "project"):
             try:
                 Project.objects.get(pk=project_id)
                 self.fields["project"].widget.attrs["data-readonly"] = "readonly"
             except ObjectDoesNotExist:
                 pass
+
+    def _seed_user_choices(self):
+        current_value = None
+        current_label = None
+
+        if self.instance.pk and self.instance.user_id:
+            current_value = user_to_candidate_token(self.instance.user)
+            current_label = str(self.instance.user)
+        elif self.is_bound:
+            current_value = self.data.get(self.add_prefix("user"))
+            if current_value:
+                current_label = candidate_label_from_token(current_value)
+
+        if current_value:
+            self.fields["user"].choices = [(current_value, current_label or current_value)]
+            self.initial["user"] = current_value
+        else:
+            self.fields["user"].choices = []
+
+    def clean_user(self):
+        token = self.cleaned_data["user"]
+        return resolve_user_from_candidate_token(token)
 
 
 class ProjectImportForm(TenancyImportForm, PrimaryModelImportForm):
@@ -124,15 +154,10 @@ class ProjectImportForm(TenancyImportForm, PrimaryModelImportForm):
 
 
 class ProjectUserImportForm(PrimaryModelImportForm):
-    user = CSVModelChoiceField(
+    user = forms.CharField(
         label=_("User"),
-        queryset=User.objects.all(),
         required=True,
-        to_field_name="username",
-        help_text=_("User to add to project"),
-        error_messages={
-            "invalid_choice": _("User not found."),
-        },
+        help_text=_("Username of an existing local user or an exact directory username eligible for provisioning."),
     )
 
     project = CSVModelChoiceField(
@@ -151,3 +176,26 @@ class ProjectUserImportForm(PrimaryModelImportForm):
             "user",
             "project",
         ]
+
+    def clean_user(self):
+        username = (self.cleaned_data.get("user") or "").strip()
+        if not username:
+            raise forms.ValidationError(_("This field is required."))
+
+        local_user = User.objects.filter(username__iexact=username).first()
+        if local_user:
+            return local_user
+
+        candidate = directory_get_user(username=username)
+        if candidate is None:
+            raise forms.ValidationError(_("User not found locally or in any enabled directory provider."))
+
+        provisioned = provision_local_user_from_candidate(candidate)
+        if provisioned is None:
+            raise forms.ValidationError(
+                _("User '{username}' has not logged in and directory provisioning is disabled.").format(
+                    username=username
+                )
+            )
+
+        return provisioned

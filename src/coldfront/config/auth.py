@@ -106,6 +106,23 @@ AUTH_LDAP_USER_ATTR_MAP = ENV.dict(
     },
 )
 
+# ------------------------------------------------------------------------------
+# Optional directory-backed user discovery / provisioning
+# ------------------------------------------------------------------------------
+# These settings are intentionally generic and separate from any specific
+# authentication backend. Core defaults to local Django User rows only.
+# Sites can enable additional providers (LDAP, AD, REST, etc.) via plugins
+# or local extensions that register directory providers.
+
+DIRECTORY_PROVIDERS_ENABLED = ENV.bool("DIRECTORY_PROVIDERS_ENABLED", default=False)
+DIRECTORY_PROVIDER_ORDER = ENV.list("DIRECTORY_PROVIDER_ORDER", default=["local"])
+DIRECTORY_USER_SEARCH_LIMIT = ENV.int("DIRECTORY_USER_SEARCH_LIMIT", default=20)
+DIRECTORY_USER_PROVISION_ENABLED = ENV.bool("DIRECTORY_USER_PROVISION_ENABLED", default=False)
+DIRECTORY_USER_PROVISION_ALLOWED_PROVIDERS = ENV.list(
+    "DIRECTORY_USER_PROVISION_ALLOWED_PROVIDERS",
+    default=[],
+)
+
 if type(REMOTE_AUTH_BACKEND) not in (list, tuple):
     REMOTE_AUTH_BACKEND = [REMOTE_AUTH_BACKEND]
 

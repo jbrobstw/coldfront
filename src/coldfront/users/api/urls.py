@@ -22,5 +22,6 @@ router.register("config", views.UserConfigViewSet, basename="userconfig")
 app_name = "users-api"
 urlpatterns = [
     path("tokens/provision/", views.TokenProvisionView.as_view(), name="token_provision"),
+    path("user-candidates/", views.UserCandidateSearchView.as_view(), name="user-candidates"),
     path("", include(router.urls)),
 ]

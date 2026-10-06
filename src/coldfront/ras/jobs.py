@@ -11,8 +11,7 @@ from coldfront.core.jobs.registry import system_job
 from coldfront.core.jobs.runner import JobRunner
 from coldfront.ras.choices import AllocationStatusChoices
 from coldfront.ras.flows import AllocationStatusFlow
-from coldfront.ras.models import Allocation
-from coldfront.ras.models import ProjectInvite
+from coldfront.ras.models import Allocation, ProjectInvite
 
 
 @system_job(interval=1440)  # daily

@@ -45,6 +45,7 @@ registry = Registry(
         "allocation_extensions": collections.defaultdict(list),
         "billing_sources": dict(),
         "third_party_accounts": dict(),
+        "directory_providers": dict(),
     }
 )
 
@@ -248,6 +249,40 @@ def get_thirdparty_account(key):
     Return the registration metadata for ``key``, or None if unregistered.
     """
     return registry["third_party_accounts"].get(key)
+
+
+def register_directory_provider(provider_class):
+    """
+    Register a directory provider class.
+
+    Providers are keyed by ``provider_class.key`` and are instantiated by the
+    users.directory service layer when needed.
+    """
+    key = getattr(provider_class, "key", None)
+    if not key or not isinstance(key, str):
+        raise ValueError(_("Directory provider must define a non-empty string key."))
+    if key in registry["directory_providers"]:
+        raise ValueError(_("Directory provider '{key}' is already registered.").format(key=key))
+
+    registry["directory_providers"][key] = provider_class
+    return provider_class
+
+
+def get_directory_provider(key):
+    """
+    Return the registered directory provider class for ``key``, or None.
+    """
+    return registry["directory_providers"].get(key)
+
+
+def get_directory_providers(enabled_only=True):
+    """
+    Return the registered directory provider classes.
+
+    ``enabled_only`` is kept for API compatibility with the service layer,
+    although enable/disable logic is handled there based on settings.
+    """
+    return list(registry["directory_providers"].values())
 
 
 def register_model_feature(name, func=None):

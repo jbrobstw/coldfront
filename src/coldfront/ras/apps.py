@@ -15,6 +15,6 @@ class RASConfig(AppConfig):
         register_models(*self.get_models())
 
         from . import (
-            jobs,   # noqa: F401
+            jobs,  # noqa: F401
             signals,  # noqa: F401
         )
