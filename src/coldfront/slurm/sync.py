@@ -336,15 +336,7 @@ def _run_activate_allocation(*, allocation_id: int) -> SyncReport:
 
     # Ensure the account exists in Slurm
     try:
-        client.create_accounts(
-            [
-                {
-                    "name": slurm_account.name,
-                    "description": slurm_account.description or "",
-                    "organization": "",
-                }
-            ]
-        )
+        client.create_accounts([_build_account_payload(slurm_account, allocation)])
         report.accounts_created += 1
     except SlurmAlreadyExistsException:
         report.warnings.append(f"Account '{slurm_account.name}' already exists")
@@ -366,7 +358,22 @@ def _run_activate_allocation(*, allocation_id: int) -> SyncReport:
     project = allocation.project
     for user in _iter_project_members(project):
         # Ensure SlurmUser exists
-        slurm_user = _ensure_slurm_user(user, cluster, slurm_account, association)
+        _slurm_user = _ensure_slurm_user(user, cluster, slurm_account, association)
+
+        # Ensure user exists in Slurm before creating the association
+        user_payload = _build_user_payload(user, cluster, slurm_account)
+        if user_payload is None:
+            report.errors.append(f"Failed to build user payload for '{user.username}'")
+            continue
+
+        try:
+            client.create_users([user_payload])
+            report.users_created += 1
+        except SlurmAlreadyExistsException:
+            report.users_updated += 1
+        except Exception as exc:
+            report.errors.append(f"Failed to create user '{user.username}': {exc}")
+            continue
 
         # Build assoc_rec_set entry
         assoc_payload = _build_assoc_payload(association, user, cluster, resource)
@@ -377,25 +384,6 @@ def _run_activate_allocation(*, allocation_id: int) -> SyncReport:
             report.associations_updated += 1
         except Exception as exc:
             report.errors.append(f"Failed to create association for {user.username}: {exc}")
-
-        # Ensure user exists in Slurm
-        try:
-            client.create_users(
-                [
-                    {
-                        "name": user.username,
-                        "default": {
-                            "account": slurm_user.default_account.name,
-                            "wckey": slurm_user.default_wckey or "",
-                        },
-                    }
-                ]
-            )
-            report.users_created += 1
-        except SlurmAlreadyExistsException:
-            report.users_updated += 1
-        except Exception as exc:
-            report.errors.append(f"Failed to create user '{user.username}': {exc}")
 
     # Trigger slurmctld cache refresh
     _reconfigure(client)
@@ -1021,14 +1009,12 @@ def _build_config_payload(cluster: SlurmCluster) -> dict[str, Any] | None:
             assoc_payloads.append(_build_assoc_payload(a, user, cluster, resource))
 
     # Build account payloads
-    account_payloads = [
-        {
-            "name": acct.name,
-            "description": acct.description or "",
-            "organization": "",
-        }
-        for acct in accounts
-    ]
+    account_allocation_map = {}
+    for assoc in active:
+        if assoc.slurm_account_id and assoc.allocation and assoc.slurm_account_id not in account_allocation_map:
+            account_allocation_map[assoc.slurm_account_id] = assoc.allocation
+
+    account_payloads = [_build_account_payload(acct, account_allocation_map.get(acct.pk)) for acct in accounts]
 
     # SU enforcement — account-level associations carrying GrpTresMins
     for acct in accounts:
@@ -1118,6 +1104,34 @@ def _build_assoc_payload(
         payload["qoslevel"] = qoslevel
 
     return payload
+
+
+def _build_account_payload(
+    account: SlurmAccount,
+    allocation: Allocation | None = None,
+) -> dict[str, Any]:
+    """Build the Slurm account payload sent to ``POST /accounts/``.
+
+    slurmdbd requires non-empty ``description`` and ``organization`` when
+    creating an account.  ColdFront therefore normalizes both values here:
+
+    * ``description``: ``SlurmAccount.description`` when present, otherwise the
+      Slurm account name.
+    * ``organization``: the Allocation's Tenant name when one is assigned,
+      otherwise the Slurm account name.
+    """
+    description = (account.description or "").strip() or account.name
+    organization = account.name
+
+    tenant = getattr(allocation, "tenant", None) if allocation is not None else None
+    if tenant is not None and getattr(tenant, "name", ""):
+        organization = tenant.name
+
+    return {
+        "name": account.name,
+        "description": description,
+        "organization": organization,
+    }
 
 
 def _build_user_payload(
