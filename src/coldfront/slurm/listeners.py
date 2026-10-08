@@ -8,7 +8,7 @@ from django.dispatch import receiver
 from coldfront.flows import register_target_callback, register_transition_permission_callback
 from coldfront.ras.choices import AllocationStatusChoices
 from coldfront.ras.flows import AllocationStatusFlow
-from coldfront.ras.models import Allocation, ProjectUser
+from coldfront.ras.models import Allocation, Project, ProjectUser
 from coldfront.slurm.models import (
     SlurmAccount,
     SlurmAssociation,
@@ -66,19 +66,64 @@ def _get_cluster_account_pairs(project):
     return result
 
 
+def _iter_project_members(project):
+    """
+    Yield every user who should receive Slurm access for a project.
+
+    This always includes the project owner, then any ProjectUser members,
+    de-duplicated by user PK.
+    """
+    seen_user_ids = set()
+
+    owner = getattr(project, "owner", None)
+    if owner is not None and owner.pk not in seen_user_ids:
+        seen_user_ids.add(owner.pk)
+        yield owner
+
+    for project_user in project.users.select_related("user").all():
+        user = project_user.user
+        if user is None or user.pk in seen_user_ids:
+            continue
+        seen_user_ids.add(user.pk)
+        yield user
+
+
+def _iter_user_projects(user):
+    """
+    Yield every project that grants the user Slurm access.
+
+    This includes projects they own and projects where they appear as a
+    ProjectUser member, de-duplicated by project PK.
+    """
+    seen_project_ids = set()
+
+    for project in Project.objects.filter(owner=user):
+        if project.pk in seen_project_ids:
+            continue
+        seen_project_ids.add(project.pk)
+        yield project
+
+    for project_user in ProjectUser.objects.filter(user=user).select_related("project"):
+        project = project_user.project
+        if project is None or project.pk in seen_project_ids:
+            continue
+        seen_project_ids.add(project.pk)
+        yield project
+
+
 def _sync_slurm_users_for_user(user):
     """
     Reconcile SlurmUser records for a given user against all projects they
-    belong to.
+    belong to or own.
 
     For each cluster the user has access to (via an active slurm allocation
     on any project), ensure a SlurmUser exists with the correct default_account.
     For clusters the user no longer has access to, remove the SlurmUser record.
     """
-    # Collect all cluster->account pairs across all projects this user belongs to
+    # Collect all cluster->account pairs across all projects this user can access
     cluster_account = {}  # cluster_pk -> (cluster, slurm_account)
-    for pu in ProjectUser.objects.filter(user=user).select_related("project"):
-        pairs = _get_cluster_account_pairs(pu.project)
+    for project in _iter_user_projects(user):
+        pairs = _get_cluster_account_pairs(project)
         for pk, (cluster, account) in pairs.items():
             if pk not in cluster_account:
                 cluster_account[pk] = (cluster, account)
@@ -196,9 +241,9 @@ def on_slurm_association_saved(instance, **kwargs):
     if not isinstance(resource, (SlurmCluster, SlurmPartition)):
         return
 
-    # Sync SlurmUser for each project member
-    for project_user in allocation.project.users.all():
-        _sync_slurm_users_for_user(project_user.user)
+    # Sync SlurmUser for each project member, including the project owner
+    for user in _iter_project_members(allocation.project):
+        _sync_slurm_users_for_user(user)
 
     # Sync QOS changes for this association
     cluster = resource if isinstance(resource, SlurmCluster) else resource.cluster
@@ -315,9 +360,8 @@ def on_allocation_activated(allocation, *, source, target):
     if slurm_account is None:
         return  # no account set yet, nothing to do
 
-    # For each ProjectUser, create SlurmUser if not exists
-    for project_user in allocation.project.users.all():
-        user = project_user.user
+    # For each project member, including the owner, create SlurmUser if needed
+    for user in _iter_project_members(allocation.project):
         # get_or_create: existing records are never modified
         SlurmUser.objects.get_or_create(
             user=user,

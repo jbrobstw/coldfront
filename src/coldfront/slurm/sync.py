@@ -364,11 +364,7 @@ def _run_activate_allocation(*, allocation_id: int) -> SyncReport:
 
     # Create associations and users for each ProjectUser
     project = allocation.project
-    for pu in ProjectUser.objects.filter(project=project).select_related("user"):
-        user = pu.user
-        if user is None:
-            continue
-
+        for user in _iter_project_members(project):
         # Ensure SlurmUser exists
         slurm_user = _ensure_slurm_user(user, cluster, slurm_account, association)
 
@@ -456,10 +452,7 @@ def _run_deactivate_allocation(*, allocation_id: int) -> SyncReport:
 
     # Kill running jobs for each ProjectUser
     project = allocation.project
-    for pu in ProjectUser.objects.filter(project=project).select_related("user"):
-        user = pu.user
-        if user is None:
-            continue
+        for user in _iter_project_members(project):
         _kill_user_jobs(client, user, slurm_account, partition_name)
 
         # Delete the association
@@ -965,6 +958,28 @@ def _run_usage_sync(
 # ---------------------------------------------------------------------------
 
 
+def _iter_project_members(project):
+    """
+    Yield every user who should receive Slurm access for a project.
+
+    This always includes the project owner, then any ProjectUser members,
+    de-duplicated by user PK.
+    """
+    seen_user_ids = set()
+
+    owner = getattr(project, "owner", None)
+    if owner is not None and owner.pk not in seen_user_ids:
+        seen_user_ids.add(owner.pk)
+        yield owner
+
+    for project_user in ProjectUser.objects.filter(project=project).select_related("user"):
+        user = project_user.user
+        if user is None or user.pk in seen_user_ids:
+            continue
+        seen_user_ids.add(user.pk)
+        yield user
+
+
 def _build_config_payload(cluster: SlurmCluster) -> dict[str, Any] | None:
     """Build the full ``openapi_slurmdbd_config_resp`` payload for a cluster.
 
@@ -996,17 +1011,14 @@ def _build_config_payload(cluster: SlurmCluster) -> dict[str, Any] | None:
         if resource is None:
             continue
 
-        for pu in allocation.project.users.all():
-            if not pu.user:
-                continue
-
-            if pu.user_id not in seen_user_ids:
-                user_payload = _build_user_payload(pu.user, cluster, a.slurm_account)
+        for user in _iter_project_members(allocation.project):
+            if user.pk not in seen_user_ids:
+                user_payload = _build_user_payload(user, cluster, a.slurm_account)
                 if user_payload is not None:
                     user_payloads.append(user_payload)
-                    seen_user_ids.add(pu.user_id)
+                    seen_user_ids.add(user.pk)
 
-            assoc_payloads.append(_build_assoc_payload(a, pu.user, cluster, resource))
+            assoc_payloads.append(_build_assoc_payload(a, user, cluster, resource))
 
     # Build account payloads
     account_payloads = [
@@ -1239,9 +1251,8 @@ def _build_expected_tuples(cluster: SlurmCluster) -> set[tuple[str, str, str]]:
         if resource is None:
             continue
         partition = resource.name if isinstance(resource, SlurmPartition) else ""
-        for pu in allocation.project.users.all():
-            if pu.user:
-                expected.add((acct.name, pu.user.username, partition))
+        for user in _iter_project_members(allocation.project):
+            expected.add((acct.name, user.username, partition))
     return expected
 
 
