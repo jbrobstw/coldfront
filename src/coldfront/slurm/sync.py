@@ -364,7 +364,7 @@ def _run_activate_allocation(*, allocation_id: int) -> SyncReport:
 
     # Create associations and users for each ProjectUser
     project = allocation.project
-        for user in _iter_project_members(project):
+    for user in _iter_project_members(project):
         # Ensure SlurmUser exists
         slurm_user = _ensure_slurm_user(user, cluster, slurm_account, association)
 
