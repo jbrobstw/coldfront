@@ -452,7 +452,7 @@ def _run_deactivate_allocation(*, allocation_id: int) -> SyncReport:
 
     # Kill running jobs for each ProjectUser
     project = allocation.project
-        for user in _iter_project_members(project):
+    for user in _iter_project_members(project):
         _kill_user_jobs(client, user, slurm_account, partition_name)
 
         # Delete the association
