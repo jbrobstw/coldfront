@@ -129,6 +129,47 @@ _SUPPORTED_VERSIONS = [
     "v0.0.41",
 ]
 
+# Slurm admin levels (SlurmUser.admin_level int) → REST ``admin_lvl`` enum string.
+_ADMIN_LEVEL_NAMES = {
+    0: "Not Set",
+    1: "None",
+    2: "Operator",
+    3: "Administrator",
+}
+
+
+def _uint32_no_val(number: int | None) -> dict[str, Any] | None:
+    """Wrap an integer in the ``uint32_no_val_struct`` object slurmrestd expects.
+
+    The REST ``assoc`` schema represents numeric limits as
+    ``{"set": true, "infinite": false, "number": N}`` rather than a bare int.
+    Returns ``None`` for ``None`` input so callers can omit the field.
+    """
+    if number is None:
+        return None
+    return {"set": True, "infinite": False, "number": int(number)}
+
+
+def _tres_list(tres: dict[str, int] | None) -> list[dict[str, Any]] | None:
+    """Convert a ``{type: count}`` dict into the REST ``tres_list`` array form.
+
+    slurmrestd expects TRES limits as an array of
+    ``{"type": "node", "count": 5}`` objects, not a flat ``{"node": 5}`` dict.
+    A TRES key may be ``"gres/gpu"`` style; the part before ``/`` is the type
+    and the remainder is the name.  Returns ``None`` for falsy input.
+    """
+    if not tres:
+        return None
+    result: list[dict[str, Any]] = []
+    for key, count in tres.items():
+        if "/" in key:
+            tres_type, tres_name = key.split("/", 1)
+            result.append({"type": tres_type, "name": tres_name, "count": int(count)})
+        else:
+            result.append({"type": key, "count": int(count)})
+    return result
+
+
 # Default config values
 _DEFAULT_TIMEOUT = 30
 _DEFAULT_RETRIES = 3
@@ -215,7 +256,10 @@ class SlurmClient:
             logger.debug("Probing API version %s at %s", v, url)
             try:
                 resp = self.session.get(url, timeout=self.timeout)
-                if resp.status_code < 500:
+                # Only a 2xx means the server actually supports this version.
+                # A 404 means the version prefix is unknown to this slurmrestd
+                # and must not be selected.
+                if _HTTP_OK <= resp.status_code < _HTTP_BAD_REQUEST:
                     self.version = v
                     logger.info(
                         "Negotiated API version %s (probed %s)",
@@ -304,31 +348,37 @@ class SlurmClient:
     ) -> dict[str, Any]:
         """Serialize an association record for ``POST /associations/``.
 
-        Works for v0.0.41 through v0.0.45. All 22 ``assoc_rec_set``
-        properties stable across versions.
+        Produces the nested ``assoc`` schema used by the ``/associations/``
+        endpoint for v0.0.41 through v0.0.45.  (The flat ``assoc_rec_set``
+        schema is only valid embedded inside ``users_add_cond.association`` /
+        ``accounts_add_cond.association``.)  Numeric limits are wrapped in
+        ``uint32_no_val_struct`` objects and TRES limits are emitted as
+        ``tres_list`` arrays, as the schema requires.
 
         Args:
             account: Slurm account name.
             user: Slurm username.
             cluster: Cluster name.
             partition: Partition name (empty string for generic assoc).
-            default_qos: Default QOS name.
-            parent: Parent account name in the hierarchy.
-            fairshare: Fairshare value (None = omit, uses Slurm default).
-            max_jobs: Maximum active jobs limit.
-            max_submit_jobs: Maximum submit jobs limit.
-            max_tres_per_job: Per-job TRES limits dict (e.g., {"node": 5}).
-            max_tres_mins_per_job: Per-job TRES minutes limits dict.
-            max_wall_duration_per_job: Max wall duration in minutes.
-            grp_tres: Group TRES limits dict.
-            grp_tres_mins: Group TRES minutes limits dict (e.g., {"billing": N}).
-                Maps to ``assoc_rec_set.grptresmins`` in the REST API.
-            grp_wall: Group wall duration limit in minutes.
-            qoslevel: List of QOS names for this association.
-                Maps to ``assoc_rec_set.qoslevel`` in the REST API.
+            default_qos: Default QOS name → ``default.qos``.
+            parent: Parent account name → ``parent_account``.
+            fairshare: Fairshare value → ``shares_raw`` (None = omit).
+            max_jobs: Maximum active jobs → ``max.jobs.active``.
+            max_submit_jobs: Maximum submit jobs → ``max.jobs.total``.
+            max_tres_per_job: Per-job TRES limits (e.g., {"node": 5}) →
+                ``max.tres.per.job``.
+            max_tres_mins_per_job: Per-job TRES minutes → ``max.tres.minutes.per.job``.
+            max_wall_duration_per_job: Max wall duration (minutes) →
+                ``max.jobs.per.wall_clock``.
+            grp_tres: Group TRES limits → ``max.tres.total``.
+            grp_tres_mins: Group TRES minutes (e.g., {"billing": N}) →
+                ``max.tres.group.minutes``.
+            grp_wall: Group wall duration limit (minutes) →
+                ``max.per.account.wall_clock``.
+            qoslevel: List of QOS names → ``qos``.
 
         Returns:
-            A dict matching the ``assoc_rec_set`` schema.
+            A dict matching the nested ``assoc`` schema.
         """
         body: dict[str, Any] = {
             "account": account,
@@ -337,29 +387,42 @@ class SlurmClient:
             "partition": partition,
         }
         if default_qos is not None:
-            body["defaultqos"] = default_qos
+            body["default"] = {"qos": default_qos}
         if parent is not None:
-            body["parent"] = parent
+            body["parent_account"] = parent
         if fairshare is not None:
-            body["fairshare"] = fairshare
-        if max_jobs is not None:
-            body["maxjobs"] = max_jobs
-        if max_submit_jobs is not None:
-            body["maxsubmitjobs"] = max_submit_jobs
-        if max_tres_per_job is not None:
-            body["maxtresperjob"] = max_tres_per_job
-        if max_tres_mins_per_job is not None:
-            body["maxtresminsperjob"] = max_tres_mins_per_job
-        if max_wall_duration_per_job is not None:
-            body["maxwalldurationperjob"] = max_wall_duration_per_job
-        if grp_tres is not None:
-            body["grptres"] = grp_tres
-        if grp_tres_mins is not None:
-            body["grptresmins"] = grp_tres_mins
-        if grp_wall is not None:
-            body["grpwall"] = grp_wall
+            body["shares_raw"] = int(fairshare)
         if qoslevel is not None:
-            body["qoslevel"] = qoslevel
+            body["qos"] = qoslevel
+
+        max_block: dict[str, Any] = {}
+        jobs_block: dict[str, Any] = {}
+        if max_jobs is not None:
+            jobs_block["active"] = _uint32_no_val(max_jobs)
+        if max_submit_jobs is not None:
+            jobs_block["total"] = _uint32_no_val(max_submit_jobs)
+        if max_wall_duration_per_job is not None:
+            jobs_block["per"] = {"wall_clock": _uint32_no_val(max_wall_duration_per_job)}
+        if jobs_block:
+            max_block["jobs"] = jobs_block
+
+        tres_block: dict[str, Any] = {}
+        if grp_tres is not None:
+            tres_block["total"] = _tres_list(grp_tres)
+        if grp_tres_mins is not None:
+            tres_block["group"] = {"minutes": _tres_list(grp_tres_mins)}
+        if max_tres_per_job is not None:
+            tres_block["per"] = {"job": _tres_list(max_tres_per_job)}
+        if max_tres_mins_per_job is not None:
+            tres_block["minutes"] = {"per": {"job": _tres_list(max_tres_mins_per_job)}}
+        if tres_block:
+            max_block["tres"] = tres_block
+
+        if grp_wall is not None:
+            max_block["per"] = {"account": {"wall_clock": _uint32_no_val(grp_wall)}}
+
+        if max_block:
+            body["max"] = max_block
         return body
 
     @staticmethod
@@ -367,23 +430,23 @@ class SlurmClient:
         name: str,
         default_account: str,
         default_wckey: str | None = None,
-        default_qos: str | None = None,
         admin_level: int = 0,
     ) -> dict[str, Any]:
         """Serialize a user record for ``POST /users/``.
 
-        Works for v0.0.41 through v0.0.45. The ``default.qos`` field
-        is included for v44+ but silently ignored by older versions.
+        Works for v0.0.41 through v0.0.45.  The REST ``user`` schema only
+        exposes ``default.account`` and ``default.wckey`` (no default QOS),
+        and ``administrator_level`` is an array of enum strings, not an int.
 
         Args:
             name: Slurm username.
             default_account: User's default Slurm account name.
             default_wckey: Optional default wckey.
-            default_qos: Optional default QOS name (v44+).
-            admin_level: Slurm admin level (0=none, 1=operator, 2=admin).
+            admin_level: Slurm admin level int (0=Not Set, 1=None,
+                2=Operator, 3=Administrator).
 
         Returns:
-            A dict matching the ``user_rec`` schema.
+            A dict matching the ``user`` schema.
         """
         body: dict[str, Any] = {
             "name": name,
@@ -392,10 +455,10 @@ class SlurmClient:
                 "wckey": default_wckey or "",
             },
         }
-        if default_qos is not None:
-            body["default"]["qos"] = default_qos
         if admin_level:
-            body["administrator_level"] = admin_level
+            level_name = _ADMIN_LEVEL_NAMES.get(admin_level)
+            if level_name is not None:
+                body["administrator_level"] = [level_name]
         return body
 
     @staticmethod
@@ -634,25 +697,35 @@ class SlurmClient:
         for w in warnings:
             logger.warning("Slurm API warning: %s", w)
 
-        # Try to map error codes from the errors array
+        # Try to map error codes from the errors array.
+        #
+        # The slurmrestd ``openapi_error`` object has no dedicated error-code
+        # field: ``error`` is the short description, ``description`` is the long
+        # form, and ``error_number`` is a numeric id.  In practice slurmrestd
+        # emits the ``ESLURM_*`` / ``SLURM_*`` macro name inside the ``error``
+        # (and/or ``description``) text, so match each known code name as a
+        # substring of those strings rather than as an exact key.
         for err in errors:
             if isinstance(err, dict):
                 error_number = err.get("error_number", err.get("num"))
-                description = err.get("error", err.get("description", ""))
-                err_code = err.get("error", "")
+                short = err.get("error", "")
+                long_desc = err.get("description", "")
+                description = short or long_desc
                 source = err.get("source", "")
             else:
                 error_number = None
-                description = str(err)
-                err_code = ""
+                short = str(err)
+                long_desc = ""
+                description = short
                 source = ""
 
-            # Map known error codes to exception types
-            if err_code and err_code in _ERROR_MAP:
-                exc_class = _ERROR_MAP[err_code]
+            haystack = f"{short} {long_desc}"
+            matched = next((code for code in _ERROR_MAP if code in haystack), None)
+            if matched is not None:
+                exc_class = _ERROR_MAP[matched]
                 logger.error(
                     "Slurm API error [%s]: %s (source=%s)",
-                    err_code,
+                    matched,
                     description,
                     source,
                 )
@@ -663,10 +736,10 @@ class SlurmClient:
                     status_code=status,
                 )
 
-            # Map error numbers if present (e.g., from openapi_error.error_number)
+            # Log numeric error ids when present for diagnostics.
             if error_number is not None:
                 logger.error(
-                    "Slurm API error_number=%d: %s",
+                    "Slurm API error_number=%s: %s",
                     error_number,
                     description,
                 )
@@ -794,7 +867,6 @@ class SlurmClient:
             except SlurmUnavailableException as exc:
                 # Transient — retry with backoff
                 last_exc = exc
-                last_body = exc.errors or []
                 logger.warning(
                     "Slurm transient failure (attempt %d/%d): %s",
                     attempt,

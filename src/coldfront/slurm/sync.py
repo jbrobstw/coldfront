@@ -678,7 +678,14 @@ def _sync_cluster(client: SlurmClient, cluster: SlurmCluster) -> SyncReport:
     # Build set of expected (account, user, partition) tuples from active
     # associations in ColdFront
     expected = _build_expected_tuples(cluster)
-    managed_accounts = {account for account, _user, _partition in expected}
+
+    # Scope orphan deletion to every account ColdFront owns on this cluster,
+    # not just accounts that currently have an expected tuple.  Otherwise a
+    # user whose allocation expired (leaving its account with no expected
+    # tuples) would never be cleaned up, and ColdFront would "lose" control of
+    # that membership instead of acting as the source of truth.  Accounts not
+    # owned by ColdFront are left untouched.
+    managed_accounts = set(SlurmAccount.objects.filter(cluster=cluster).values_list("name", flat=True))
 
     # Delete orphaned associations
     for assoc in existing.get("associations", []):
@@ -968,6 +975,53 @@ def _iter_project_members(project):
         yield user
 
 
+def _topo_sort_accounts(accounts: Any) -> list[SlurmAccount]:
+    """Order accounts so every parent precedes its children.
+
+    The Slurm account hierarchy is expressed through
+    :attr:`SlurmAssociation.parent` (an association's account has that account
+    as its parent).  Accounts must be created in parent-before-child order so a
+    child account's associations can reference an already-existing parent.
+
+    Accounts whose parent is outside the supplied set (or unknown) are treated
+    as roots.  Any cycle is broken deterministically by falling back to name
+    order for the remaining accounts.
+    """
+    account_list = list(accounts)
+    by_pk = {acct.pk: acct for acct in account_list}
+
+    # Map child account pk -> parent account pk (within this set only).
+    parent_of: dict[int, int] = {}
+    for assoc in SlurmAssociation.objects.filter(
+        slurm_account_id__in=by_pk.keys(),
+        parent__isnull=False,
+    ).values("slurm_account_id", "parent_id"):
+        child_pk = assoc["slurm_account_id"]
+        parent_pk = assoc["parent_id"]
+        if parent_pk in by_pk and parent_pk != child_pk:
+            parent_of[child_pk] = parent_pk
+
+    ordered: list[SlurmAccount] = []
+    placed: set[int] = set()
+
+    def place(pk: int, visiting: set[int]) -> None:
+        if pk in placed or pk in visiting:
+            return
+        visiting.add(pk)
+        parent_pk = parent_of.get(pk)
+        if parent_pk is not None:
+            place(parent_pk, visiting)
+        visiting.discard(pk)
+        if pk not in placed:
+            placed.add(pk)
+            ordered.append(by_pk[pk])
+
+    for acct in sorted(account_list, key=lambda a: a.name):
+        place(acct.pk, set())
+
+    return ordered
+
+
 def _build_config_payload(cluster: SlurmCluster) -> dict[str, Any] | None:
     """Build the full ``openapi_slurmdbd_config_resp`` payload for a cluster.
 
@@ -985,10 +1039,20 @@ def _build_config_payload(cluster: SlurmCluster) -> dict[str, Any] | None:
         if a.slurm_account_id:
             account_ids.add(a.slurm_account_id)
 
-    accounts = SlurmAccount.objects.filter(pk__in=account_ids)
+    accounts = _topo_sort_accounts(SlurmAccount.objects.filter(pk__in=account_ids))
 
-    # Build association payloads
-    assoc_payloads = []
+    # Account-level associations establish the account hierarchy (parent_account)
+    # and carry account-wide limits (GrpTresMins).  They MUST be sent before any
+    # user associations so the account exists under its parent first.  Collect
+    # them separately and prepend them to the association list below.
+    account_assoc_payloads: list[dict[str, Any]] = []
+    for acct in accounts:
+        account_assoc_payload = _build_account_assoc_payload(acct, cluster)
+        if account_assoc_payload:
+            account_assoc_payloads.append(account_assoc_payload)
+
+    # Build user association payloads
+    user_assoc_payloads: list[dict[str, Any]] = []
     user_payloads = []
     seen_user_ids: set[int] = set()
     for a in active:
@@ -1006,7 +1070,10 @@ def _build_config_payload(cluster: SlurmCluster) -> dict[str, Any] | None:
                     user_payloads.append(user_payload)
                     seen_user_ids.add(user.pk)
 
-            assoc_payloads.append(_build_assoc_payload(a, user, cluster, resource))
+            user_assoc_payloads.append(_build_assoc_payload(a, user, cluster, resource))
+
+    # Account-level associations first, then user associations.
+    assoc_payloads = account_assoc_payloads + user_assoc_payloads
 
     # Build account payloads
     account_allocation_map = {}
@@ -1015,12 +1082,6 @@ def _build_config_payload(cluster: SlurmCluster) -> dict[str, Any] | None:
             account_allocation_map[assoc.slurm_account_id] = assoc.allocation
 
     account_payloads = [_build_account_payload(acct, account_allocation_map.get(acct.pk)) for acct in accounts]
-
-    # SU enforcement — account-level associations carrying GrpTresMins
-    for acct in accounts:
-        account_assoc_payload = _build_account_assoc_payload(acct, cluster)
-        if account_assoc_payload:
-            assoc_payloads.append(account_assoc_payload)
 
     # Build cluster payload
     cluster_payload = {
@@ -1071,39 +1132,35 @@ def _build_assoc_payload(
     cluster: SlurmCluster,
     resource: SlurmCluster | SlurmPartition,
 ) -> dict[str, Any]:
-    """Build an ``assoc_rec_set`` payload entry from ColdFront models."""
+    """Build a nested ``assoc`` payload entry from ColdFront models.
+
+    Delegates to :meth:`SlurmClient.serialize_association` so the nested
+    schema, ``uint32_no_val_struct`` wrapping, and ``tres_list`` conversion
+    live in a single place.
+    """
     slurm_account = association.slurm_account
     partition_name = resource.name if isinstance(resource, SlurmPartition) else ""
 
-    payload: dict[str, Any] = {
-        "account": slurm_account.name if slurm_account else "",
-        "user": user.username,
-        "cluster": cluster.name,
-        "partition": partition_name,
-        "fairshare": association.fairshare,
-    }
-
-    if association.default_qos:
-        payload["defaultqos"] = association.default_qos.name
-    if association.parent:
-        payload["parent"] = association.parent.name
-    if association.max_jobs is not None:
-        payload["maxjobs"] = association.max_jobs
-    if association.max_submit_jobs is not None:
-        payload["maxsubmitjobs"] = association.max_submit_jobs
-    if association.max_tres_per_job is not None:
-        payload["maxtresperjob"] = association.max_tres_per_job
-    if association.max_tres_mins_per_job is not None:
-        payload["maxtresminsperjob"] = association.max_tres_mins_per_job
+    max_wall = None
     if association.max_wall_duration_per_job is not None:
-        payload["maxwalldurationperjob"] = int(association.max_wall_duration_per_job.total_seconds())
+        # Slurm wall limits are expressed in minutes.
+        max_wall = int(association.max_wall_duration_per_job.total_seconds() // 60)
 
-    # QOS add/remove — merge account-level and association-level
-    qoslevel = _build_effective_qos(slurm_account, association)
-    if qoslevel:
-        payload["qoslevel"] = qoslevel
-
-    return payload
+    return SlurmClient.serialize_association(
+        account=slurm_account.name if slurm_account else "",
+        user=user.username,
+        cluster=cluster.name,
+        partition=partition_name,
+        default_qos=association.default_qos.name if association.default_qos else None,
+        parent=association.parent.name if association.parent else None,
+        fairshare=association.fairshare,
+        max_jobs=association.max_jobs,
+        max_submit_jobs=association.max_submit_jobs,
+        max_tres_per_job=association.max_tres_per_job or None,
+        max_tres_mins_per_job=association.max_tres_mins_per_job or None,
+        max_wall_duration_per_job=max_wall,
+        qoslevel=_build_effective_qos(slurm_account, association),
+    )
 
 
 def _build_account_payload(
@@ -1135,9 +1192,9 @@ def _build_account_payload(
 
 
 def _build_user_payload(
-        user: Any,
-        cluster: SlurmCluster,
-        fallback_account: SlurmAccount | None,
+    user: Any,
+    cluster: SlurmCluster,
+    fallback_account: SlurmAccount | None,
 ) -> dict[str, Any] | None:
     """Build a Slurm user payload for full sync.
 
@@ -1146,23 +1203,25 @@ def _build_user_payload(
     ``SlurmUser`` exists, fall back to the active association's account so the
     user record is still sent to slurmdbd before the association upsert.
     """
-    slurm_user = SlurmUser.objects.filter(user=user, cluster=cluster).select_related(
-        "default_account",
-        "default_qos",
-    ).first()
+    slurm_user = (
+        SlurmUser.objects.filter(user=user, cluster=cluster)
+        .select_related(
+            "default_account",
+            "default_qos",
+        )
+        .first()
+    )
 
     default_account = slurm_user.default_account if slurm_user and slurm_user.default_account else fallback_account
     if default_account is None:
         return None
 
-    payload = {"name": user.username, "default": {"account": default_account.name, "wckey": ""}}
-    if slurm_user and slurm_user.default_wckey:
-        payload["default"]["wckey"] = slurm_user.default_wckey
-    if slurm_user and slurm_user.default_qos:
-        payload["default"]["qos"] = slurm_user.default_qos.name
-    if slurm_user and slurm_user.admin_level:
-        payload["administrator_level"] = slurm_user.admin_level
-    return payload
+    return SlurmClient.serialize_user(
+        name=user.username,
+        default_account=default_account.name,
+        default_wckey=slurm_user.default_wckey if slurm_user else None,
+        admin_level=slurm_user.admin_level if slurm_user and slurm_user.admin_level else 0,
+    )
 
 
 def _build_account_assoc_payload(
@@ -1179,13 +1238,13 @@ def _build_account_assoc_payload(
     """
     if not cluster.enforce_su_limits or not account.service_units:
         return None
-    return {
-        "account": account.name,
-        "user": "",
-        "cluster": cluster.name,
-        "partition": "",
-        "grptresmins": {"billing": account.service_units * 60},
-    }
+    return SlurmClient.serialize_association(
+        account=account.name,
+        user="",
+        cluster=cluster.name,
+        partition="",
+        grp_tres_mins={"billing": account.service_units * 60},
+    )
 
 
 def _sync_association_qos(

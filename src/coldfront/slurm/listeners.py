@@ -17,6 +17,7 @@ from coldfront.slurm.models import (
     SlurmUser,
 )
 from coldfront.slurm.sync import (
+    _iter_project_members,
     _sync_association_qos,
     enqueue_activate_allocation,
     enqueue_deactivate_allocation,
@@ -64,28 +65,6 @@ def _get_cluster_account_pairs(project):
         result[cluster.pk] = (cluster, association.slurm_account)
 
     return result
-
-
-def _iter_project_members(project):
-    """
-    Yield every user who should receive Slurm access for a project.
-
-    This always includes the project owner, then any ProjectUser members,
-    de-duplicated by user PK.
-    """
-    seen_user_ids = set()
-
-    owner = getattr(project, "owner", None)
-    if owner is not None and owner.pk not in seen_user_ids:
-        seen_user_ids.add(owner.pk)
-        yield owner
-
-    for project_user in project.users.select_related("user").all():
-        user = project_user.user
-        if user is None or user.pk in seen_user_ids:
-            continue
-        seen_user_ids.add(user.pk)
-        yield user
 
 
 def _iter_user_projects(user):
@@ -166,23 +145,23 @@ def on_project_user_saved(instance, created, **kwargs):
             project=instance.project,
             status=AllocationStatusChoices.STATUS_ACTIVE,
         ).select_related("resource_object_type")
-        
+
         for allocation in allocations:
             resource = allocation.resource_object
             if resource is None:
                 continue
-            
+
             if isinstance(resource, SlurmPartition):
                 cluster = resource.cluster
             elif isinstance(resource, SlurmCluster):
                 cluster = resource
             else:
                 continue
-            
+
             association = SlurmAssociation.objects.filter(allocation=allocation).first()
             if association is None or association.slurm_account is None:
                 continue
-            
+
             enqueue_activate_allocation(allocation.pk, cluster_id=cluster.pk)
 
 

@@ -145,15 +145,18 @@ class TestSerializers:
 
     def test_serialize_association_fairshare(self):
         body = SlurmClient.serialize_association("a", "u", "c", fairshare=1)
-        assert body["fairshare"] == 1
+        # fairshare maps to the nested ``shares_raw`` field.
+        assert body["shares_raw"] == 1
 
     def test_serialize_association_default_qos(self):
         body = SlurmClient.serialize_association("a", "u", "c", default_qos="normal")
-        assert body["defaultqos"] == "normal"
+        # default_qos maps to the nested ``default.qos`` field.
+        assert body["default"]["qos"] == "normal"
 
     def test_serialize_association_parent(self):
         body = SlurmClient.serialize_association("a", "u", "c", parent="root")
-        assert body["parent"] == "root"
+        # parent maps to the nested ``parent_account`` field.
+        assert body["parent_account"] == "root"
 
     def test_serialize_association_limits(self):
         body = SlurmClient.serialize_association(
@@ -168,35 +171,45 @@ class TestSerializers:
             grp_tres={"node": 20},
             grp_wall=43200,
         )
-        assert body["maxjobs"] == 10
-        assert body["maxsubmitjobs"] == 50
-        assert body["maxwalldurationperjob"] == 1440
-        assert body["maxtresperjob"] == {"node": 5}
-        assert body["maxtresminsperjob"] == {"cpu": 1000}
+        # Numeric limits are wrapped in uint32_no_val_struct objects.
+        assert body["max"]["jobs"]["active"] == {"set": True, "infinite": False, "number": 10}
+        assert body["max"]["jobs"]["total"] == {"set": True, "infinite": False, "number": 50}
+        assert body["max"]["jobs"]["per"]["wall_clock"] == {
+            "set": True,
+            "infinite": False,
+            "number": 1440,
+        }
+        # TRES limits are emitted as tres_list arrays.
+        assert body["max"]["tres"]["per"]["job"] == [{"type": "node", "count": 5}]
+        assert body["max"]["tres"]["minutes"]["per"]["job"] == [{"type": "cpu", "count": 1000}]
+        assert body["max"]["tres"]["total"] == [{"type": "node", "count": 20}]
+        assert body["max"]["per"]["account"]["wall_clock"] == {
+            "set": True,
+            "infinite": False,
+            "number": 43200,
+        }
 
     def test_serialize_association_grptresmins(self):
         body = SlurmClient.serialize_association("a", "", "c", grp_tres_mins={"billing": 600000})
-        assert body["grptresmins"] == {"billing": 600000}
+        # grp_tres_mins maps to nested max.tres.group.minutes as a tres_list.
+        assert body["max"]["tres"]["group"]["minutes"] == [{"type": "billing", "count": 600000}]
 
     def test_serialize_association_omits_grptresmins_when_none(self):
         body = SlurmClient.serialize_association("a", "u", "c")
-        assert "grptresmins" not in body
+        assert "max" not in body
 
     def test_serialize_user_minimal(self):
         body = SlurmClient.serialize_user("jsmith", "hpc-lab")
         assert body["name"] == "jsmith"
         assert body["default"]["account"] == "hpc-lab"
         assert body["default"]["wckey"] == ""
-        # default_qos not included
+        # default_qos is not part of the user schema.
         assert "qos" not in body["default"]
 
-    def test_serialize_user_with_default_qos(self):
-        body = SlurmClient.serialize_user("jsmith", "hpc-lab", default_qos="normal")
-        assert body["default"]["qos"] == "normal"
-
     def test_serialize_user_with_admin_level(self):
+        # admin_level int maps to an array of enum strings.
         body = SlurmClient.serialize_user("admin", "root", admin_level=2)
-        assert body["administrator_level"] == 2
+        assert body["administrator_level"] == ["Operator"]
 
     def test_serialize_kill_jobs_msg_minimal(self):
         body = SlurmClient.serialize_kill_jobs_msg()
@@ -317,7 +330,7 @@ class TestSerializers:
         cases = [
             SlurmClient.serialize_account("test"),
             SlurmClient.serialize_association("a", "u", "c", partition="gpu", fairshare=1),
-            SlurmClient.serialize_user("u", "a", default_qos="q"),
+            SlurmClient.serialize_user("u", "a", admin_level=3),
             SlurmClient.serialize_kill_jobs_msg(user_name="u", account="a"),
             SlurmClient.serialize_users_add_cond(users=["u"]),
             SlurmClient.serialize_accounts_add_cond(accounts=["a"]),
@@ -1284,20 +1297,22 @@ class TestVersionCompatibility:
         assert body["organization"] == "org"
 
     def test_serializer_association_all_versions(self, spec_version):
-        """Association serializer produces same shape for every version."""
+        """Association serializer produces same nested shape for every version."""
         body = SlurmClient.serialize_association("a", "u", "c", partition="p", fairshare=1)
         assert body["account"] == "a"
         assert body["user"] == "u"
         assert body["cluster"] == "c"
         assert body["partition"] == "p"
-        assert body["fairshare"] == 1
+        # fairshare maps to the nested ``shares_raw`` field (v0.0.41–v0.0.45).
+        assert body["shares_raw"] == 1
 
     def test_serializer_user_all_versions(self, spec_version):
         """User serializer produces same shape for every version."""
-        body = SlurmClient.serialize_user("u", "a", default_qos="q")
+        body = SlurmClient.serialize_user("u", "a", admin_level=3)
         assert body["name"] == "u"
         assert body["default"]["account"] == "a"
-        assert body["default"]["qos"] == "q"
+        # admin_level int maps to an enum-string array.
+        assert body["administrator_level"] == ["Administrator"]
 
     def test_url_construction_all_versions(self, spec_version):
         """URL path uses the version prefix correctly."""

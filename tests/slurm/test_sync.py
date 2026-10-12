@@ -625,7 +625,8 @@ class TestBuildAccountAssocPayload(TestCase):
             "user": "",
             "cluster": "hpc01",
             "partition": "",
-            "grptresmins": {"billing": 600000},
+            # GrpTresMins is emitted as the nested max.tres.group.minutes tres_list.
+            "max": {"tres": {"group": {"minutes": [{"type": "billing", "count": 600000}]}}},
         }
 
     def test_none_when_not_enforced(self):
@@ -669,7 +670,13 @@ class TestBuildConfigIncludesAccountGrpTresMins(TestCase):
         ):
             payload = _build_config_payload(self.cluster)
         assert payload is not None
-        assert any(a.get("user") == "" and a.get("grptresmins") == {"billing": 600000} for a in payload["associations"])
+
+        def _is_account_grptresmins(a):
+            return a.get("user") == "" and a.get("max", {}).get("tres", {}).get("group", {}).get("minutes") == [
+                {"type": "billing", "count": 600000}
+            ]
+
+        assert any(_is_account_grptresmins(a) for a in payload["associations"])
 
     def test_config_omits_account_assoc_when_not_enforced(self):
         self.cluster.enforce_su_limits = False
