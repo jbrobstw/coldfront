@@ -605,7 +605,8 @@ class TestBuildHelpers(TestCase):
 
 
 class TestBuildAccountAssocPayload(TestCase):
-    """Test _build_account_assoc_payload GrpTresMins emission."""
+    """Test _build_account_assoc_payload: always emits an account association,
+    with GrpTresMins only when enforced + granted, and parent_account when set."""
 
     @classmethod
     def setUpTestData(cls):
@@ -629,15 +630,32 @@ class TestBuildAccountAssocPayload(TestCase):
             "max": {"tres": {"group": {"minutes": [{"type": "billing", "count": 600000}]}}},
         }
 
-    def test_none_when_not_enforced(self):
+    def test_emits_bare_account_assoc_when_not_enforced(self):
+        # Always registers the account on the cluster, even with no limits.
         payload = _build_account_assoc_payload(self.account, self.cluster)
-        assert payload is None
+        assert payload == {
+            "account": "acct-a",
+            "user": "",
+            "cluster": "hpc01",
+            "partition": "",
+        }
 
-    def test_none_when_no_grant(self):
+    def test_emits_bare_account_assoc_when_no_grant(self):
         self.cluster.enforce_su_limits = True
         self.cluster.save()
         account = SlurmAccount.objects.create(name="acct-b", cluster=self.cluster)
-        assert _build_account_assoc_payload(account, self.cluster) is None
+        payload = _build_account_assoc_payload(account, self.cluster)
+        assert payload == {
+            "account": "acct-b",
+            "user": "",
+            "cluster": "hpc01",
+            "partition": "",
+        }
+
+    def test_includes_parent_account_when_parent_set(self):
+        payload = _build_account_assoc_payload(self.account, self.cluster, parent="cs")
+        assert payload["parent_account"] == "cs"
+        assert payload["user"] == ""
 
 
 class TestBuildConfigIncludesAccountGrpTresMins(TestCase):
@@ -678,7 +696,9 @@ class TestBuildConfigIncludesAccountGrpTresMins(TestCase):
 
         assert any(_is_account_grptresmins(a) for a in payload["associations"])
 
-    def test_config_omits_account_assoc_when_not_enforced(self):
+    def test_config_includes_bare_account_assoc_when_not_enforced(self):
+        # The account-level association is always present to register the
+        # account on the cluster; only GrpTresMins is gated on enforcement.
         self.cluster.enforce_su_limits = False
         self.cluster.save()
         with mock.patch(
@@ -687,7 +707,10 @@ class TestBuildConfigIncludesAccountGrpTresMins(TestCase):
         ):
             payload = _build_config_payload(self.cluster)
         assert payload is not None
-        assert not any(a.get("user") == "" for a in payload["associations"])
+        account_assocs = [a for a in payload["associations"] if a.get("user") == ""]
+        assert account_assocs
+        # No GrpTresMins when enforcement is off.
+        assert all("max" not in a for a in account_assocs)
 
 
 # ======================================================================

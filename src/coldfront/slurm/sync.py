@@ -344,15 +344,17 @@ def _run_activate_allocation(*, allocation_id: int) -> SyncReport:
     except Exception as exc:
         report.errors.append(f"Failed to create account '{slurm_account.name}': {exc}")
 
-    # SU enforcement — push GrpTresMins on the account-level association
-    account_assoc_payload = _build_account_assoc_payload(slurm_account, cluster)
-    if account_assoc_payload:
-        try:
-            client.create_associations([account_assoc_payload])
-        except SlurmAlreadyExistsException:
-            pass  # idempotent upsert — desired state achieved
-        except Exception as exc:
-            report.errors.append(f"Failed to set GrpTresMins for account '{slurm_account.name}': {exc}")
+    # Account-level association: registers the account on the cluster, places
+    # it under its parent, and (when SU limits are enforced) carries GrpTresMins.
+    # This MUST precede user associations so the account exists on the cluster.
+    parent_name = association.parent.name if association.parent else None
+    account_assoc_payload = _build_account_assoc_payload(slurm_account, cluster, parent=parent_name)
+    try:
+        client.create_associations([account_assoc_payload])
+    except SlurmAlreadyExistsException:
+        pass  # idempotent upsert — desired state achieved
+    except Exception as exc:
+        report.errors.append(f"Failed to create account association for '{slurm_account.name}': {exc}")
 
     # Create associations and users for each ProjectUser
     project = allocation.project
@@ -1041,15 +1043,28 @@ def _build_config_payload(cluster: SlurmCluster) -> dict[str, Any] | None:
 
     accounts = _topo_sort_accounts(SlurmAccount.objects.filter(pk__in=account_ids))
 
+    # Map account pk -> parent account name (from the association hierarchy) so
+    # account-level associations can establish parent_account correctly.
+    parent_name_by_account: dict[int, str] = {}
+    for row in (
+        SlurmAssociation.objects.filter(slurm_account_id__in=account_ids, parent__isnull=False)
+        .select_related("parent")
+        .values("slurm_account_id", "parent__name")
+    ):
+        parent_name_by_account.setdefault(row["slurm_account_id"], row["parent__name"])
+
     # Account-level associations establish the account hierarchy (parent_account)
     # and carry account-wide limits (GrpTresMins).  They MUST be sent before any
     # user associations so the account exists under its parent first.  Collect
     # them separately and prepend them to the association list below.
     account_assoc_payloads: list[dict[str, Any]] = []
     for acct in accounts:
-        account_assoc_payload = _build_account_assoc_payload(acct, cluster)
-        if account_assoc_payload:
-            account_assoc_payloads.append(account_assoc_payload)
+        account_assoc_payload = _build_account_assoc_payload(
+            acct,
+            cluster,
+            parent=parent_name_by_account.get(acct.pk),
+        )
+        account_assoc_payloads.append(account_assoc_payload)
 
     # Build user association payloads
     user_assoc_payloads: list[dict[str, Any]] = []
@@ -1146,13 +1161,18 @@ def _build_assoc_payload(
         # Slurm wall limits are expressed in minutes.
         max_wall = int(association.max_wall_duration_per_job.total_seconds() // 60)
 
+    # NOTE: ``parent_account`` is intentionally NOT set on user associations.
+    # A user association places ``user`` under ``account``; setting
+    # ``parent_account`` here would reparent the *user* under the account's
+    # parent (e.g. "cs") instead of under ``account`` itself. The account's
+    # own position in the hierarchy is established by the account-level
+    # association (``user=""``) built in ``_build_account_assoc_payload``.
     return SlurmClient.serialize_association(
         account=slurm_account.name if slurm_account else "",
         user=user.username,
         cluster=cluster.name,
         partition=partition_name,
         default_qos=association.default_qos.name if association.default_qos else None,
-        parent=association.parent.name if association.parent else None,
         fairshare=association.fairshare,
         max_jobs=association.max_jobs,
         max_submit_jobs=association.max_submit_jobs,
@@ -1227,23 +1247,30 @@ def _build_user_payload(
 def _build_account_assoc_payload(
     account: SlurmAccount,
     cluster: SlurmCluster,
-) -> dict[str, Any] | None:
-    """Build the account-level association payload carrying GrpTresMins.
+    parent: str | None = None,
+) -> dict[str, Any]:
+    """Build the account-level association (``user=""``) payload.
 
-    GrpTresMins is an association-level field; an account's grant is stored
-    on the account-level association (``user=""``). Only emitted when the
-    cluster enforces SU limits and the account has a service_units grant.
+    This association registers the account on the cluster and places it in
+    the hierarchy via ``parent_account``.  It is always emitted (even with no
+    limits) because an account is only usable on a cluster once it has an
+    account-level association; without it the account exists in slurmdbd's
+    acct_table but never appears under the cluster.
 
-    Returns None when enforcement is off or the grant is unset.
+    GrpTresMins (the account's SU grant) is an association-level field carried
+    here, but only when the cluster enforces SU limits and a grant is set.
     """
-    if not cluster.enforce_su_limits or not account.service_units:
-        return None
+    grp_tres_mins = None
+    if cluster.enforce_su_limits and account.service_units:
+        grp_tres_mins = {"billing": account.service_units * 60}
+
     return SlurmClient.serialize_association(
         account=account.name,
         user="",
         cluster=cluster.name,
         partition="",
-        grp_tres_mins={"billing": account.service_units * 60},
+        parent=parent,
+        grp_tres_mins=grp_tres_mins,
     )
 
 
