@@ -10,6 +10,7 @@ import signal
 import sys
 import time
 from argparse import ArgumentTypeError, BooleanOptionalAction
+from contextlib import contextmanager
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
@@ -21,6 +22,7 @@ from django_tasks.base import TaskContext
 from django_tasks.signals import task_finished, task_started
 from django_tasks.utils import get_random_id
 
+from coldfront.core.jobs.runner import JobLogHandler
 from coldfront.core.models import Job
 from coldfront.core.tasks.backends.coldfront import ColdFrontBackend
 
@@ -170,6 +172,33 @@ class Worker:
             if self.running and not job:
                 time.sleep(self.interval)
 
+    @contextmanager
+    def _capture_job_logs(self, job):
+        """
+        Route ``coldfront`` log records into ``job.log_entries`` for the
+        duration of a bare-task execution.
+
+        ``JobRunner`` subclasses attach their own ``JobLogHandler`` in
+        ``__init__``; bare ``@task`` callables do not, so without this their
+        logging output never reaches the Job UI.
+        """
+        root = logging.getLogger("coldfront")
+        handler = JobLogHandler(job)
+        handler.setLevel(logging.INFO)
+        previous_level = root.level
+        if root.level > logging.INFO or root.level == logging.NOTSET:
+            root.setLevel(logging.INFO)
+        root.addHandler(handler)
+        try:
+            yield
+        finally:
+            root.removeHandler(handler)
+            root.setLevel(previous_level)
+            # ``set_successful``/``set_failed`` save with ``update_fields`` that
+            # exclude ``log_entries``; persist captured entries explicitly.
+            if job.log_entries:
+                job.save(update_fields=["log_entries"])
+
     def run_job(self, job):
         """Execute a Job and record its outcome."""
         try:
@@ -189,21 +218,32 @@ class Worker:
                 from django.utils.module_loading import import_string
 
                 runner_cls = import_string(runner_cls_path)
-                return_value = runner_cls.handle(
+                # ``JobRunner.handle`` finalizes the job itself (status, error,
+                # log_entries) via ``job.terminate()``. Do NOT call
+                # ``set_successful()`` afterwards or it would clobber that
+                # terminal status and wipe ``data``.
+                runner_cls.handle(
                     job,
                     *task_result.args,
                     **task_result.kwargs,
                 )
-            elif task.takes_context:
-                return_value = task.call(
-                    TaskContext(task_result=task_result),
-                    *task_result.args,
-                    **task_result.kwargs,
-                )
+                job.refresh_from_db()
             else:
-                return_value = task.call(*task_result.args, **task_result.kwargs)
+                # Bare ``@task`` callables don't attach a ``JobLogHandler``, so
+                # their logging output would be lost from the Job UI. Capture
+                # ``coldfront`` log records into ``job.log_entries`` while the
+                # task runs.
+                with self._capture_job_logs(job):
+                    if task.takes_context:
+                        return_value = task.call(
+                            TaskContext(task_result=task_result),
+                            *task_result.args,
+                            **task_result.kwargs,
+                        )
+                    else:
+                        return_value = task.call(*task_result.args, **task_result.kwargs)
 
-            job.set_successful(return_value)
+                job.set_successful(return_value)
             task_finished.send(sender=backend_type, task_result=job.task_result)
         except BaseException as e:
             job.set_failed(e)
