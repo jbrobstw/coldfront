@@ -219,7 +219,7 @@ class JobStatusChoices(ChoiceSet):
     STATUS_ERRORED = "errored"
 
     CHOICES = (
-        (STATUS_PENDING, _("Pending"), "default"),
+        (STATUS_PENDING, _("Pending"), "secondary"),
         (STATUS_SCHEDULED, _("Scheduled"), "info"),
         (STATUS_RUNNING, _("Running"), "warning"),
         (STATUS_COMPLETED, _("Completed"), "success"),

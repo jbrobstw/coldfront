@@ -10,9 +10,7 @@
                 </c-card.fields.item>
 
                 <c-card.fields.item label="{% trans 'Status' %}">
-                    <c-ui.badge :value="object.get_status_color" bg_color="blue" only>
-                        <c-slot name="value">{{ object.get_status_display }}</c-slot>
-                    </c-ui.badge>
+                    <c-ui.badge value="{{ object.get_status_display }}" :bg_color="object.get_status_color" />
                 </c-card.fields.item>
 
                 <c-card.fields.item label="{% trans 'Created' %}">
