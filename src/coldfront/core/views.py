@@ -208,7 +208,7 @@ class JobLogView(generic.ObjectView):
 
     def get_extra_context(self, request, instance):
         return {
-            "log_entries": instance.log_entries,
+            "log_entries": instance.get_log_entries(),
         }
 
 

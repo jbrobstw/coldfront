@@ -350,6 +350,41 @@ class ColdFrontBackendDBTestCase(TestCase):
         self.assertEqual(job.data, {"partial": True})
         self.assertIn("ValueError", job.error)
 
+    def test_get_log_entries_derives_from_report(self):
+        """get_log_entries() builds entries from the report's errors/warnings/counters."""
+        job = Job.objects.create(
+            name="Report Job",
+            job_id=uuid.uuid4(),
+            status=JobStatusChoices.STATUS_COMPLETED,
+            completed=timezone.now(),
+            data={
+                "success": True,
+                "accounts_created": 2,
+                "errors": [],
+                "warnings": ["account already exists"],
+            },
+        )
+        entries = job.get_log_entries()
+        levels = [e["level"] for e in entries]
+        messages = [e["message"] for e in entries]
+        self.assertIn("WARNING", levels)
+        self.assertIn("INFO", levels)
+        self.assertNotIn("ERROR", levels)
+        self.assertIn("account already exists", messages)
+        self.assertTrue(any("accounts created: 2" in m for m in messages))
+
+    def test_get_log_entries_falls_back_to_log_entries(self):
+        """get_log_entries() returns stored log_entries when data has no report shape."""
+        stored = [{"timestamp": "", "level": "INFO", "message": "hello"}]
+        job = Job.objects.create(
+            name="Plain Job",
+            job_id=uuid.uuid4(),
+            status=JobStatusChoices.STATUS_COMPLETED,
+            data={"result": "ok"},
+            log_entries=stored,
+        )
+        self.assertEqual(job.get_log_entries(), stored)
+
     def test_job_task_property_reconstructs_task(self):
         """task property loads the Task from task_path."""
         task_obj = _task_path()

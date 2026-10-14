@@ -537,6 +537,44 @@ class Job(models.Model):
         entry = JobLogEntry.from_logrecord(record)
         self.log_entries.append(asdict(entry))
 
+    def get_log_entries(self):
+        """
+        Return the job's log entries for display.
+
+        The job's report (``data``) is the source of truth: when it carries
+        ``errors``/``warnings`` lists, they are rendered as ``ERROR``/``WARNING``
+        entries plus an ``INFO`` outcome summary. When the report has no such
+        structure, any natively captured ``log_entries`` are returned as a
+        fallback.
+        """
+        timestamp = self.completed.isoformat() if self.completed else ""
+        data = self.data if isinstance(self.data, dict) else None
+
+        if data is not None and ("errors" in data or "warnings" in data):
+            entries = []
+            for message in data.get("errors") or []:
+                entries.append({"timestamp": timestamp, "level": "ERROR", "message": str(message)})
+            for message in data.get("warnings") or []:
+                entries.append({"timestamp": timestamp, "level": "WARNING", "message": str(message)})
+            summary = self._report_summary(data)
+            if summary:
+                entries.append({"timestamp": timestamp, "level": "INFO", "message": summary})
+            return entries
+
+        return self.log_entries
+
+    @staticmethod
+    def _report_summary(data: dict) -> str:
+        """Build a one-line INFO summary from a report's counters and outcome."""
+        counts = [
+            f"{key.replace('_', ' ')}: {value}"
+            for key, value in data.items()
+            if isinstance(value, int) and not isinstance(value, bool) and value
+        ]
+        outcome = _("Succeeded") if data.get("success") else _("Failed")
+        detail = f" ({', '.join(counts)})" if counts else ""
+        return f"{outcome}{detail}"
+
     @classmethod
     def enqueue(
         cls,
