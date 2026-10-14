@@ -333,6 +333,23 @@ class ColdFrontBackendDBTestCase(TestCase):
         self.assertIsNotNone(job.completed)
         self.assertIn("ValueError", job.error)
 
+    def test_job_set_failed_preserves_result(self):
+        """set_failed() keeps a supplied result in data instead of clearing it."""
+        job = Job.objects.create(
+            name="Will Fail With Report",
+            job_id=uuid.uuid4(),
+            status=JobStatusChoices.STATUS_RUNNING,
+        )
+        try:
+            raise ValueError("test error")
+        except ValueError as e:
+            job.set_failed(e, result={"partial": True})
+
+        job.refresh_from_db()
+        self.assertEqual(job.status, JobStatusChoices.STATUS_FAILED)
+        self.assertEqual(job.data, {"partial": True})
+        self.assertIn("ValueError", job.error)
+
     def test_job_task_property_reconstructs_task(self):
         """task property loads the Task from task_path."""
         task_obj = _task_path()

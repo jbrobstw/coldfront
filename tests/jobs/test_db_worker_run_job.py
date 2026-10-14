@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+from dataclasses import dataclass, field
 
 from django.test import TestCase
 from django_tasks import task as task_decorator
@@ -17,6 +18,19 @@ def logging_task():
     """A bare task that logs through the ``coldfront`` logger and returns a value."""
     logging.getLogger("coldfront.tests.logging_task").info("bare task ran")
     return {"result": "ok"}
+
+
+@dataclass
+class _Report:
+    """Minimal report-like return value with a ``success`` flag."""
+
+    success: bool
+    errors: list[str] = field(default_factory=list)
+
+
+def failing_report_task():
+    """A bare task that returns a report reporting failure without raising."""
+    return _Report(success=False, errors=["boom"])
 
 
 class ReturningRunner(JobRunner):
@@ -84,6 +98,28 @@ class RunJobBareTaskLogCaptureTestCase(TestCase):
         from coldfront.core.jobs.runner import JobLogHandler
 
         self.assertFalse(any(isinstance(h, JobLogHandler) for h in root.handlers))
+
+
+class RunJobReportStatusTestCase(TestCase):
+    """A returned report's ``success`` flag should drive the job's status."""
+
+    def _enqueue(self, job_id, func):
+        task = task_decorator()(func)
+        return Job.objects.create(
+            name=func.__name__,
+            job_id=job_id,
+            task_path=task.module_path,
+            args_kwargs={"args": [], "kwargs": {}},
+            status=JobStatusChoices.STATUS_PENDING,
+        )
+
+    def test_failing_report_marks_job_failed_and_saves_data(self):
+        job = self._enqueue("66666666-6666-6666-6666-666666666666", failing_report_task)
+        _make_worker().run_job(job)
+        job.refresh_from_db()
+        # Returned report.success is False -> FAILED, but the report is kept.
+        self.assertEqual(job.status, JobStatusChoices.STATUS_FAILED)
+        self.assertEqual(job.data, {"success": False, "errors": ["boom"]})
 
 
 class RunJobRunnerFinalizationTestCase(TestCase):

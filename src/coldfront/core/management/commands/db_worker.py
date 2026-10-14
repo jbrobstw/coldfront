@@ -243,7 +243,10 @@ class Worker:
                     else:
                         return_value = task.call(*task_result.args, **task_result.kwargs)
 
-                job.set_successful(return_value)
+                # ``set_result`` persists the returned report in ``data`` and
+                # derives the terminal status from its ``success`` flag, so a
+                # report is never lost even when the task reports failure.
+                job.set_result(return_value)
             task_finished.send(sender=backend_type, task_result=job.task_result)
         except BaseException as e:
             job.set_failed(e)

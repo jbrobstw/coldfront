@@ -424,16 +424,37 @@ class Job(models.Model):
         self.error = ""
         self.save(update_fields=["status", "completed", "data", "error"])
 
-    def set_failed(self, exc: BaseException) -> None:
+    def set_result(self, return_value) -> None:
+        """
+        Record a task's return value and derive the terminal status from it.
+
+        The returned ``data`` is always persisted, regardless of outcome. When
+        the return value reports its own failure (a truthy ``success`` attribute
+        that is ``False``), the job is marked ``FAILED``; otherwise ``COMPLETED``.
+        """
+        reported_success = getattr(return_value, "success", None)
+        if reported_success is False:
+            self.status = JobStatusChoices.STATUS_FAILED
+        else:
+            self.status = JobStatusChoices.STATUS_COMPLETED
+        self.completed = timezone.now()
+        self.data = _normalize_job_result(return_value)
+        self.error = ""
+        self.save(update_fields=["status", "completed", "data", "error"])
+
+    def set_failed(self, exc: BaseException, result=None) -> None:
         """
         Mark this job as failed due to an exception.
 
-        Stores the exception traceback in ``error`` and clears ``data``.
+        Stores the exception traceback in ``error``. Any ``result`` produced
+        before the failure (for example a partial report) is preserved in
+        ``data`` so it is never lost; ``data`` is only cleared when no result
+        is supplied.
         """
         self.status = JobStatusChoices.STATUS_FAILED
         self.completed = timezone.now()
         self.error = get_exception_traceback(exc)
-        self.data = None
+        self.data = _normalize_job_result(result) if result is not None else None
         self.save(update_fields=["status", "completed", "error", "data"])
 
     # ------------------------------------------------------------------
