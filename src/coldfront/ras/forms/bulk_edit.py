@@ -6,13 +6,11 @@ from crispy_forms.layout import Fieldset
 from django import forms
 from django.utils.translation import gettext_lazy as _
 
-from coldfront.context import current_request
 from coldfront.forms import (
     AllocatableResourceBulkEditForm,
     OrganizationalModelBulkEditForm,
     PrimaryModelBulkEditForm,
 )
-from coldfront.forms.widgets import BulkEditNullBooleanSelect
 from coldfront.ras.choices import AllocationStatusChoices, ResourceStatusChoices
 from coldfront.ras.models import Allocation, Project, ProjectUser, Resource, ResourceType
 from coldfront.users.models import Group, User
@@ -195,16 +193,6 @@ class AllocationBulkEditForm(PrimaryModelBulkEditForm):
         required=False,
         label=_("Justification"),
     )
-    auto_expire = forms.NullBooleanField(
-        label=_("Auto expire"),
-        required=False,
-        widget=BulkEditNullBooleanSelect,
-    )
-    expiration_grace_days = forms.IntegerField(
-        required=False,
-        min_value=0,
-        label=_("Expiration grace days"),
-    )
     model = Allocation
     nullable_fields = (
         "tenant_group",
@@ -216,22 +204,11 @@ class AllocationBulkEditForm(PrimaryModelBulkEditForm):
         "start_date",
         "end_date",
         "justification",
-        "expiration_grace_days",
     )
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        request = current_request.get()
-        user = getattr(request, "user", None)
-        self._show_expiration_controls = bool(user and user.is_authenticated and user.is_superuser)
-        if not self._show_expiration_controls:
-            self.fields.pop("auto_expire", None)
-            self.fields.pop("expiration_grace_days", None)
 
     @property
     def fieldsets(self):
-        fieldsets = [
+        return [
             Fieldset(
                 _("Allocation"),
                 "description",
@@ -239,20 +216,13 @@ class AllocationBulkEditForm(PrimaryModelBulkEditForm):
                 "owner",
                 "status",
             ),
-        ]
-        if self._show_expiration_controls:
-            fieldsets.append(Fieldset(_("Expiration"), "auto_expire", "expiration_grace_days"))
-        fieldsets.append(
             Fieldset(
                 _("Dates"),
                 "start_date",
                 "end_date",
             ),
-        )
-        fieldsets.append(
             Fieldset(
                 _("Text"),
                 "justification",
             ),
-        )
-        return fieldsets
+        ]

@@ -34,10 +34,6 @@ from coldfront.utils.forms import get_field_value
 from coldfront.utils.jsonschema import JSONSchemaProperty
 
 
-def _user_is_admin(user):
-    return bool(user and user.is_authenticated and user.is_superuser)
-
-
 class AllocationBaseForm(AllocationExtensionFormMixin, PrimaryModelForm):
     resource_object = forms.ChoiceField(
         choices=[],
@@ -331,8 +327,6 @@ class AllocationForm(AllocationBaseForm, TenancyForm, PrimaryModelForm):
             "slug",
             "start_date",
             "end_date",
-            "auto_expire",
-            "expiration_grace_days",
             "status",
             "description",
             "justification",
@@ -368,12 +362,6 @@ class AllocationForm(AllocationBaseForm, TenancyForm, PrimaryModelForm):
         # self.fields["status"].required = False
         # self.fields["status"].disabled = True
 
-        # Only superusers can edit auto-expire fields
-        self._show_expiration_controls = _user_is_admin(self.user)
-        if not self._show_expiration_controls:
-            self.fields.pop("auto_expire", None)
-            self.fields.pop("expiration_grace_days", None)
-
         # Only admins can modify slug
         if hasattr(self, "user") and self.user and self.user.is_authenticated and self.user.is_superuser:
             return
@@ -401,21 +389,11 @@ class AllocationForm(AllocationBaseForm, TenancyForm, PrimaryModelForm):
                 "description",
                 "justification",
             ),
-        ]
-        if self._show_expiration_controls:
-            fieldsets.append(
-                Fieldset(
-                    _("Expiration"),
-                    "auto_expire",
-                    "expiration_grace_days",
-                )
-            )
-        fieldsets.append(
             Fieldset(
                 _("Comments"),
                 "comments",
-            )
-        )
+            ),
+        ]
         # Add extension fieldsets
         for entry in self._extension_field_map:
             header = _(f"{entry['model']._meta.verbose_name.title()} Details")
@@ -445,8 +423,6 @@ class AllocationActivateForm(AllocationBaseForm, PrimaryModelForm):
             "owner",
             "start_date",
             "end_date",
-            "auto_expire",
-            "expiration_grace_days",
             "description",
             "justification",
         ]
@@ -471,13 +447,6 @@ class AllocationActivateForm(AllocationBaseForm, PrimaryModelForm):
                 comments=comments,
             )
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._show_expiration_controls = _user_is_admin(self.user)
-        if not self._show_expiration_controls:
-            self.fields.pop("auto_expire", None)
-            self.fields.pop("expiration_grace_days", None)
-
     @property
     def fieldsets(self):
         fieldsets = [
@@ -495,21 +464,11 @@ class AllocationActivateForm(AllocationBaseForm, PrimaryModelForm):
                 "description",
                 "justification",
             ),
-        ]
-        if self._show_expiration_controls:
-            fieldsets.append(
-                Fieldset(
-                    _("Expiration"),
-                    "auto_expire",
-                    "expiration_grace_days",
-                )
-            )
-        fieldsets.append(
             Fieldset(
                 _("Comments"),
                 "comments",
             ),
-        )
+        ]
         # Add extension fieldsets
         for entry in self._extension_field_map:
             header = _(f"{entry['model']._meta.verbose_name.title()} Details")
