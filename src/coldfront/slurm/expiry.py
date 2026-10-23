@@ -53,13 +53,14 @@ class ExpiryConfig:
     set_fields: dict[str, Any] = field(default_factory=dict)
 
 
-# ``name -> (callable, human_label)``
-_STRATEGIES: dict[str, tuple[Callable[..., None], Any]] = {}
+# ``name -> (callable, human_label, reversal_callable | None)``
+_STRATEGIES: dict[str, tuple[Callable[..., None], Any, Callable[..., None] | None]] = {}
 
 
 def register_slurm_expiry_strategy(
     name: str,
     label: Any | None = None,
+    reverse: Callable[..., None] | None = None,
 ) -> Callable[[Callable[..., None]], Callable[..., None]]:
     """Register a Slurm expiry strategy under ``name``.
 
@@ -73,6 +74,10 @@ def register_slurm_expiry_strategy(
             settings.  Re-registering an existing name overrides it (so plugins
             can replace built-ins intentionally).
         label: Human-readable label shown in the UI.  Defaults to ``name``.
+        reverse: Optional callable with the same signature as the strategy that
+            undoes the expiry representation when the allocation is reactivated
+            (e.g. after a renewal).  ``None`` means no explicit reversal is
+            required because reactivation already restores the correct state.
 
     Returns:
         The decorator that registers and returns the strategy callable unchanged.
@@ -81,7 +86,7 @@ def register_slurm_expiry_strategy(
     def decorator(func: Callable[..., None]) -> Callable[..., None]:
         if name in _STRATEGIES:
             logger.info("Overriding existing Slurm expiry strategy %r", name)
-        _STRATEGIES[name] = (func, label if label is not None else name)
+        _STRATEGIES[name] = (func, label if label is not None else name, reverse)
         return func
 
     return decorator
@@ -91,6 +96,12 @@ def get_strategy(name: str) -> Callable[..., None] | None:
     """Return the strategy callable registered under ``name`` (or ``None``)."""
     entry = _STRATEGIES.get(name)
     return entry[0] if entry is not None else None
+
+
+def get_strategy_reversal(name: str) -> Callable[..., None] | None:
+    """Return the reversal callable for ``name`` (or ``None`` if none / unknown)."""
+    entry = _STRATEGIES.get(name)
+    return entry[2] if entry is not None else None
 
 
 def list_strategies() -> list[str]:
@@ -104,7 +115,28 @@ def strategy_choices() -> list[tuple[str, Any]]:
     Used to populate the per-cluster strategy form field so built-in *and*
     plugin-provided strategies surface in the UI.
     """
-    return sorted(((name, label) for name, (_func, label) in _STRATEGIES.items()), key=lambda pair: pair[0])
+    return sorted(
+        ((name, label) for name, (_func, label, _reverse) in _STRATEGIES.items()),
+        key=lambda pair: pair[0],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Built-in reversals
+# ---------------------------------------------------------------------------
+
+
+def _reverse_restore(allocation: Allocation, cluster: SlurmCluster, *, config: ExpiryConfig) -> None:
+    """Shared reversal: re-assert normal association limits/QOS.
+
+    Used by the ``throttle``, ``hold`` and ``set_fields`` strategies, all of
+    which modify associations in place.  ``remove_associations`` needs no
+    reversal because reactivation recreates the associations from scratch, and
+    ``noop`` has nothing to undo.
+    """
+    from coldfront.slurm.sync import enqueue_restore_allocation
+
+    enqueue_restore_allocation(allocation.pk, cluster_id=cluster.pk)
 
 
 # ---------------------------------------------------------------------------
@@ -117,13 +149,14 @@ def _strategy_remove_associations(allocation: Allocation, cluster: SlurmCluster,
     """Kill jobs and delete the allocation's Slurm associations.
 
     This is ColdFront's historical expiry behavior and the default strategy.
+    No reversal is registered: reactivation recreates associations from scratch.
     """
     from coldfront.slurm.sync import enqueue_deactivate_allocation
 
     enqueue_deactivate_allocation(allocation.pk, cluster_id=cluster.pk)
 
 
-@register_slurm_expiry_strategy("throttle", label=_("Throttle to zero jobs"))
+@register_slurm_expiry_strategy("throttle", label=_("Throttle to zero jobs"), reverse=_reverse_restore)
 def _strategy_throttle(allocation: Allocation, cluster: SlurmCluster, *, config: ExpiryConfig) -> None:
     """Set ``GrpJobs=0``/``GrpSubmitJobs=0`` without removing associations.
 
@@ -135,7 +168,7 @@ def _strategy_throttle(allocation: Allocation, cluster: SlurmCluster, *, config:
     enqueue_throttle_allocation(allocation.pk, cluster_id=cluster.pk)
 
 
-@register_slurm_expiry_strategy("hold", label=_("Move to hold QOS"))
+@register_slurm_expiry_strategy("hold", label=_("Move to hold QOS"), reverse=_reverse_restore)
 def _strategy_hold(allocation: Allocation, cluster: SlurmCluster, *, config: ExpiryConfig) -> None:
     """Move the allocation's associations onto a configured frozen QOS."""
     from coldfront.slurm.sync import enqueue_hold_allocation
@@ -143,7 +176,7 @@ def _strategy_hold(allocation: Allocation, cluster: SlurmCluster, *, config: Exp
     enqueue_hold_allocation(allocation.pk, cluster_id=cluster.pk, hold_qos=config.hold_qos)
 
 
-@register_slurm_expiry_strategy("set_fields", label=_("Apply custom association fields"))
+@register_slurm_expiry_strategy("set_fields", label=_("Apply custom association fields"), reverse=_reverse_restore)
 def _strategy_set_fields(allocation: Allocation, cluster: SlurmCluster, *, config: ExpiryConfig) -> None:
     """Apply arbitrary ``serialize_association`` overrides to the associations."""
     from coldfront.slurm.sync import enqueue_set_fields_allocation
@@ -223,6 +256,41 @@ def dispatch_expiry(allocation: Allocation, cluster: SlurmCluster) -> None:
     except Exception:
         logger.exception(
             "Slurm expiry strategy %r failed for allocation %s on cluster %s",
+            name,
+            allocation.pk,
+            cluster.name,
+        )
+
+
+def dispatch_expiry_reversal(allocation: Allocation, cluster: SlurmCluster) -> None:
+    """Resolve and run the reversal of the effective expiry strategy.
+
+    Called when an allocation is reactivated (e.g. after a renewal) so any
+    in-place modifications made by the expiry strategy (``throttle``, ``hold``,
+    ``set_fields``) are undone.  Strategies whose expiry is self-healing on
+    reactivation (``remove_associations``) or that take no action (``noop``)
+    register no reversal, in which case this is a no-op.
+
+    Like :func:`dispatch_expiry`, this never raises: an unknown strategy or a
+    failing reversal is logged and swallowed so it cannot break the activation
+    transition that triggered it.
+    """
+    name = resolve_strategy_name(cluster)
+    reversal = get_strategy_reversal(name)
+    if reversal is None:
+        logger.debug(
+            "No Slurm expiry reversal for strategy %r — nothing to undo for allocation %s",
+            name,
+            allocation.pk,
+        )
+        return
+
+    config = resolve_config(cluster)
+    try:
+        reversal(allocation, cluster, config=config)
+    except Exception:
+        logger.exception(
+            "Slurm expiry reversal %r failed for allocation %s on cluster %s",
             name,
             allocation.pk,
             cluster.name,

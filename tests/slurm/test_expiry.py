@@ -12,7 +12,9 @@ from coldfront.slurm import expiry
 from coldfront.slurm.expiry import (
     ExpiryConfig,
     dispatch_expiry,
+    dispatch_expiry_reversal,
     get_strategy,
+    get_strategy_reversal,
     list_strategies,
     register_slurm_expiry_strategy,
     resolve_config,
@@ -192,3 +194,97 @@ class DispatchExpiryTestCase(TestCase):
         self.cluster.expiry_strategy = "capture"
         dispatch_expiry(self.allocation, self.cluster)
         self.assertIsInstance(captured["config"], ExpiryConfig)
+
+
+class StrategyReversalRegistryTestCase(TestCase):
+    def setUp(self):
+        _snapshot_registry(self)
+
+    def test_builtins_with_reversals(self):
+        # throttle/hold/set_fields restore in place, so they have a reversal.
+        for name in ("throttle", "hold", "set_fields"):
+            self.assertIsNotNone(get_strategy_reversal(name))
+
+    def test_builtins_without_reversals(self):
+        # remove_associations self-heals on activation; noop has nothing to undo.
+        for name in ("remove_associations", "noop"):
+            self.assertIsNone(get_strategy_reversal(name))
+
+    def test_get_reversal_unknown_returns_none(self):
+        self.assertIsNone(get_strategy_reversal("does_not_exist"))
+
+    def test_register_with_reverse(self):
+        def _reverse(allocation, cluster, *, config):
+            return None
+
+        @register_slurm_expiry_strategy("custom_rev", reverse=_reverse)
+        def _strategy(allocation, cluster, *, config):
+            return None
+
+        self.assertIs(get_strategy_reversal("custom_rev"), _reverse)
+
+    def test_register_without_reverse_defaults_none(self):
+        @register_slurm_expiry_strategy("no_rev")
+        def _strategy(allocation, cluster, *, config):
+            return None
+
+        self.assertIsNone(get_strategy_reversal("no_rev"))
+
+
+class DispatchExpiryReversalTestCase(TestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.cluster = SlurmCluster.objects.create(name="hpc")
+
+    def setUp(self):
+        self.allocation = type("Alloc", (), {"pk": 42})()
+
+    def test_dispatch_throttle_reversal(self):
+        self.cluster.expiry_strategy = "throttle"
+        with patch("coldfront.slurm.sync.enqueue_restore_allocation") as mock_fn:
+            dispatch_expiry_reversal(self.allocation, self.cluster)
+        mock_fn.assert_called_once_with(42, cluster_id=self.cluster.pk)
+
+    def test_dispatch_hold_reversal(self):
+        self.cluster.expiry_strategy = "hold"
+        with patch("coldfront.slurm.sync.enqueue_restore_allocation") as mock_fn:
+            dispatch_expiry_reversal(self.allocation, self.cluster)
+        mock_fn.assert_called_once_with(42, cluster_id=self.cluster.pk)
+
+    def test_dispatch_set_fields_reversal(self):
+        self.cluster.expiry_strategy = "set_fields"
+        with patch("coldfront.slurm.sync.enqueue_restore_allocation") as mock_fn:
+            dispatch_expiry_reversal(self.allocation, self.cluster)
+        mock_fn.assert_called_once_with(42, cluster_id=self.cluster.pk)
+
+    @override_settings(SLURM_EXPIRY_STRATEGY="remove_associations")
+    def test_dispatch_remove_associations_reversal_noop(self):
+        self.cluster.expiry_strategy = ""
+        with patch("coldfront.slurm.sync.enqueue_restore_allocation") as mock_fn:
+            dispatch_expiry_reversal(self.allocation, self.cluster)
+        mock_fn.assert_not_called()
+
+    def test_dispatch_noop_reversal_does_nothing(self):
+        self.cluster.expiry_strategy = "noop"
+        with patch("coldfront.slurm.sync.enqueue_restore_allocation") as mock_fn:
+            dispatch_expiry_reversal(self.allocation, self.cluster)
+        mock_fn.assert_not_called()
+
+    def test_dispatch_unknown_strategy_reversal_swallowed(self):
+        self.cluster.expiry_strategy = "nonexistent_strategy"
+        # Must not raise.
+        dispatch_expiry_reversal(self.allocation, self.cluster)
+
+    def test_dispatch_failing_reversal_swallowed(self):
+        _snapshot_registry(self)
+
+        def _boom_reverse(allocation, cluster, *, config):
+            raise RuntimeError("kaboom")
+
+        @register_slurm_expiry_strategy("boom_rev", reverse=_boom_reverse)
+        def _strategy(allocation, cluster, *, config):
+            return None
+
+        self.cluster.expiry_strategy = "boom_rev"
+        # Exception from reversal must be swallowed.
+        dispatch_expiry_reversal(self.allocation, self.cluster)

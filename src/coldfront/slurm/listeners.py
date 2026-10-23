@@ -9,7 +9,7 @@ from coldfront.flows import register_target_callback, register_transition_permis
 from coldfront.ras.choices import AllocationStatusChoices
 from coldfront.ras.flows import AllocationStatusFlow
 from coldfront.ras.models import Allocation, Project, ProjectUser
-from coldfront.slurm.expiry import dispatch_expiry
+from coldfront.slurm.expiry import dispatch_expiry, dispatch_expiry_reversal
 from coldfront.slurm.models import (
     SlurmAccount,
     SlurmAssociation,
@@ -351,6 +351,12 @@ def on_allocation_activated(allocation, *, source, target):
 
     # Enqueue REST API sync for this allocation
     enqueue_activate_allocation(allocation.pk, cluster_id=cluster.pk)
+
+    # Undo any in-place expiry modifications (throttle/hold/set_fields) left on
+    # the associations so a renewed allocation is no longer restricted.  The
+    # reversal is resolved from the cluster's configured expiry strategy and is
+    # a no-op for strategies that recreate associations on activation.
+    dispatch_expiry_reversal(allocation, cluster)
 
 
 @register_target_callback(AllocationStatusFlow, AllocationStatusChoices.STATUS_EXPIRED)

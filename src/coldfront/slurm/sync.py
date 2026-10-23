@@ -67,6 +67,7 @@ __all__ = (
     "enqueue_throttle_allocation",
     "enqueue_hold_allocation",
     "enqueue_set_fields_allocation",
+    "enqueue_restore_allocation",
     "enqueue_remove_project_user",
     "import_cluster_from_conf",
     "import_cluster_from_api",
@@ -682,6 +683,110 @@ def _run_set_fields_allocation(*, allocation_id: int, fields: dict[str, Any]) ->
         kill_jobs=False,
         description="set_fields",
     )
+
+
+# ``{"set": false, "infinite": true}`` tells slurmrestd to clear a numeric limit
+# back to unlimited (equivalent to setting it to ``-1`` with sacctmgr).
+_UINT32_INFINITE = {"set": False, "infinite": True, "number": 0}
+
+
+def enqueue_restore_allocation(allocation_id: int, cluster_id: int | None = None) -> None:
+    """Enqueue a task that restores an allocation's normal association limits.
+
+    This is the inverse of the ``throttle``/``hold``/``set_fields`` expiry
+    strategies.  It re-asserts each association's stored limits and QOS and
+    explicitly clears the job-count and QOS fields those strategies modify so a
+    renewed allocation is no longer throttled or held.  Respects the per-cluster
+    ``auto_sync_enabled`` gate.
+    """
+    cluster = SlurmCluster.objects.get(pk=cluster_id) if cluster_id is not None else None
+    if not _auto_sync_enabled(cluster):
+        logger.debug(
+            "Slurm auto sync disabled — skipping restore enqueue for allocation %s",
+            allocation_id,
+        )
+        return
+
+    logger.info("Enqueuing Slurm restore for allocation %s", allocation_id)
+    Job.enqueue(
+        "coldfront.slurm.sync._run_restore_allocation",
+        name=f"SlurmRestore:allocation-{allocation_id}",
+        priority=3,
+        allocation_id=allocation_id,
+    )
+
+
+def _run_restore_allocation(*, allocation_id: int) -> SyncReport:
+    """Worker: undo expiry modifications by re-asserting normal association state.
+
+    Re-posts each user association with its stored limits/QOS (via
+    :func:`_build_assoc_payload`).  Because a slurmrestd upsert never clears a
+    field that is absent from the payload, any job-count limit or QOS left out
+    of the stored values is explicitly cleared to unlimited here so an earlier
+    ``throttle``/``hold``/``set_fields`` modification cannot persist.
+    """
+    report = SyncReport(cluster="", success=False)
+
+    try:
+        allocation = Allocation.objects.get(pk=allocation_id)
+    except Allocation.DoesNotExist:
+        report.errors.append(f"Allocation {allocation_id} not found")
+        return report
+
+    resource = allocation.resource_object
+    if resource is None:
+        report.errors.append(f"Allocation {allocation_id} has no resource")
+        return report
+
+    if isinstance(resource, SlurmCluster):
+        cluster = resource
+    elif isinstance(resource, SlurmPartition):
+        cluster = resource.cluster
+    else:
+        report.errors.append(f"Allocation {allocation_id} targets non-slurm resource")
+        return report
+
+    report.cluster = cluster.name
+
+    client = _build_client(cluster)
+    if client is None:
+        report.errors.append("slurmrestd not configured (SLURMRESTD_URL is empty)")
+        return report
+
+    try:
+        association = SlurmAssociation.objects.get(allocation=allocation)
+    except SlurmAssociation.DoesNotExist:
+        report.success = True
+        return report
+
+    slurm_account = association.slurm_account
+    if slurm_account is None:
+        report.success = True
+        return report
+
+    for user in _iter_project_members(allocation.project):
+        payload = _build_assoc_payload(association, user, cluster, resource)
+
+        # Explicitly clear the job-count limits that ``throttle``/``set_fields``
+        # may have zeroed when the allocation carries no stored value.
+        jobs_block = payload.setdefault("max", {}).setdefault("jobs", {})
+        jobs_block.setdefault("active", dict(_UINT32_INFINITE))
+        jobs_block.setdefault("total", dict(_UINT32_INFINITE))
+
+        # Ensure QOS is re-asserted so a ``hold`` QOS is replaced; an empty list
+        # removes any lingering hold QOS when the allocation defines none.
+        payload.setdefault("qos", payload.get("qos") or [])
+
+        try:
+            client.create_associations([payload])
+            report.associations_updated += 1
+        except Exception as exc:
+            report.errors.append(f"Failed to restore association for {user.username}: {exc}")
+
+    _reconfigure(client)
+
+    report.success = len(report.errors) == 0
+    return report
 
 
 def _run_remove_project_user(*, project_id: int, user_id: int) -> SyncReport:
