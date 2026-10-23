@@ -391,6 +391,10 @@ def _run_activate_allocation(*, allocation_id: int) -> SyncReport:
         except Exception as exc:
             report.errors.append(f"Failed to create association for {user.username}: {exc}")
 
+    # Re-read what Slurm actually stored (a ``-1`` reset becomes unset) so the
+    # ColdFront association reflects the real Slurm limits.
+    _readback_association_limits(client, association, cluster, resource)
+
     # Trigger slurmctld cache refresh
     _reconfigure(client)
 
@@ -688,6 +692,92 @@ def _run_set_fields_allocation(*, allocation_id: int, fields: dict[str, Any]) ->
 # ``{"set": false, "infinite": true}`` tells slurmrestd to clear a numeric limit
 # back to unlimited (equivalent to setting it to ``-1`` with sacctmgr).
 _UINT32_INFINITE = {"set": False, "infinite": True, "number": 0}
+
+
+def _no_val_number(value: Any) -> int | None:
+    """Read a ``uint32_no_val_struct`` from a slurmrestd response into an int.
+
+    slurmrestd returns numeric limits as
+    ``{"set": bool, "infinite": bool, "number": N}``.  A limit that is unset or
+    reported as infinite has no concrete value, so ``None`` is returned (which
+    ColdFront stores as ``NULL``).  A bare integer is accepted for robustness.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        if not value.get("set", False) or value.get("infinite", False):
+            return None
+        number = value.get("number")
+        return int(number) if number is not None else None
+    if isinstance(value, (int, float)):
+        return int(value)
+    return None
+
+
+def _readback_association_limits(
+    client: SlurmClient,
+    association: SlurmAssociation,
+    cluster: SlurmCluster,
+    resource: SlurmCluster | SlurmPartition,
+) -> None:
+    """Re-read an association's job limits from Slurm and store them in ColdFront.
+
+    After a ``-1`` (reset) limit is pushed, slurmdbd clears the limit and reports
+    it as unset.  This queries the association back from slurmrestd and persists
+    the resulting ``max_jobs``/``max_submit_jobs`` so ColdFront matches Slurm.
+    Failures are logged and swallowed so they never break the activation flow.
+    """
+    slurm_account = association.slurm_account
+    if slurm_account is None:
+        return
+
+    partition_name = resource.name if isinstance(resource, SlurmPartition) else ""
+
+    try:
+        response = client.get_associations(
+            account=slurm_account.name,
+            cluster=cluster.name,
+            partition=partition_name or None,
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to read back association limits for allocation %s: %s",
+            association.allocation_id,
+            exc,
+        )
+        return
+
+    entries = response.get("associations", []) if isinstance(response, dict) else []
+    # Prefer an account-level (``user == ""``) entry; fall back to the first.
+    entry = None
+    for candidate in entries:
+        if not candidate.get("user"):
+            entry = candidate
+            break
+    if entry is None and entries:
+        entry = entries[0]
+    if entry is None:
+        return
+
+    jobs = (entry.get("max") or {}).get("jobs") or {}
+    new_max_jobs = _no_val_number(jobs.get("active"))
+    new_max_submit_jobs = _no_val_number(jobs.get("total"))
+
+    changed_fields: list[str] = []
+    if association.max_jobs != new_max_jobs:
+        association.max_jobs = new_max_jobs
+        changed_fields.append("max_jobs")
+    if association.max_submit_jobs != new_max_submit_jobs:
+        association.max_submit_jobs = new_max_submit_jobs
+        changed_fields.append("max_submit_jobs")
+
+    if changed_fields:
+        association.save(update_fields=changed_fields)
+        logger.info(
+            "Synced association limits for allocation %s from Slurm: %s",
+            association.allocation_id,
+            ", ".join(f"{f}={getattr(association, f)}" for f in changed_fields),
+        )
 
 
 def enqueue_restore_allocation(allocation_id: int, cluster_id: int | None = None) -> None:

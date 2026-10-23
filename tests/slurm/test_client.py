@@ -189,6 +189,20 @@ class TestSerializers:
             "number": 43200,
         }
 
+    def test_serialize_association_reset_limit_with_negative_one(self):
+        # ``-1`` is Slurm's "reset the limit" sentinel. It must be encoded as the
+        # NO_VAL form (set=false) so slurmdbd clears the limit rather than
+        # storing a literal -1.
+        body = SlurmClient.serialize_association(
+            "a",
+            "u",
+            "c",
+            max_jobs=-1,
+            max_submit_jobs=-1,
+        )
+        assert body["max"]["jobs"]["active"] == {"set": False, "infinite": False, "number": 0}
+        assert body["max"]["jobs"]["total"] == {"set": False, "infinite": False, "number": 0}
+
     def test_serialize_association_grptresmins(self):
         body = SlurmClient.serialize_association("a", "", "c", grp_tres_mins={"billing": 600000})
         # grp_tres_mins maps to nested max.tres.group.minutes as a tres_list.

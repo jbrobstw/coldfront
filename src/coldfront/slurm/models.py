@@ -5,6 +5,7 @@
 from django.conf import settings
 from django.contrib.contenttypes.models import ContentType
 from django.core.exceptions import ValidationError
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models import Sum
 from django.utils.text import slugify
@@ -42,36 +43,44 @@ class SlurmQOS(OrganizationalModel):
             "when this QOS is used. Maps to Priority in the dump format."
         ),
     )
-    max_submit_jobs_per_user = models.PositiveIntegerField(
+    max_submit_jobs_per_user = models.IntegerField(
         blank=True,
         null=True,
+        validators=[MinValueValidator(-1)],
         verbose_name=_("max submit jobs per user"),
         help_text=_(
-            "Maximum number of jobs a user can submit with this QOS. Maps to MaxSubmitJobsPU in the dump format."
+            "Maximum number of jobs a user can submit with this QOS. Maps to "
+            "MaxSubmitJobsPU in the dump format. Use -1 to reset the limit in Slurm."
         ),
     )
-    max_jobs_per_user = models.PositiveIntegerField(
+    max_jobs_per_user = models.IntegerField(
         blank=True,
         null=True,
+        validators=[MinValueValidator(-1)],
         verbose_name=_("max jobs per user"),
         help_text=_(
-            "Maximum number of running jobs a user can have with this QOS. Maps to MaxJobsPU in the dump format."
+            "Maximum number of running jobs a user can have with this QOS. Maps to "
+            "MaxJobsPU in the dump format. Use -1 to reset the limit in Slurm."
         ),
     )
-    max_submit_jobs_per_account = models.PositiveIntegerField(
+    max_submit_jobs_per_account = models.IntegerField(
         blank=True,
         null=True,
+        validators=[MinValueValidator(-1)],
         verbose_name=_("max submit jobs per account"),
         help_text=_(
-            "Maximum number of jobs an account can submit with this QOS. Maps to MaxSubmitJobsPA in the dump format."
+            "Maximum number of jobs an account can submit with this QOS. Maps to "
+            "MaxSubmitJobsPA in the dump format. Use -1 to reset the limit in Slurm."
         ),
     )
-    max_jobs_per_account = models.PositiveIntegerField(
+    max_jobs_per_account = models.IntegerField(
         blank=True,
         null=True,
+        validators=[MinValueValidator(-1)],
         verbose_name=_("max jobs per account"),
         help_text=_(
-            "Maximum number of running jobs an account can have with this QOS. Maps to MaxJobsPA in the dump format."
+            "Maximum number of running jobs an account can have with this QOS. Maps to "
+            "MaxJobsPA in the dump format. Use -1 to reset the limit in Slurm."
         ),
     )
     max_wall_duration_per_job = models.DurationField(
@@ -389,18 +398,24 @@ class SlurmPartition(AllocatableResourceMixin, PrimaryModel):
         verbose_name=_("cluster"),
     )
 
-    max_jobs = models.PositiveIntegerField(
+    max_jobs = models.IntegerField(
         blank=True,
         null=True,
+        validators=[MinValueValidator(-1)],
         verbose_name=_("max jobs"),
-        help_text=_("Maximum number of jobs that can run simultaneously in this partition."),
+        help_text=_(
+            "Maximum number of jobs that can run simultaneously in this partition. Use -1 to reset the limit in Slurm."
+        ),
     )
 
-    max_submit_jobs = models.PositiveIntegerField(
+    max_submit_jobs = models.IntegerField(
         blank=True,
         null=True,
+        validators=[MinValueValidator(-1)],
         verbose_name=_("max submit jobs"),
-        help_text=_("Maximum number of jobs that can be submitted by this association."),
+        help_text=_(
+            "Maximum number of jobs that can be submitted by this association. Use -1 to reset the limit in Slurm."
+        ),
     )
 
     max_tres_per_job = models.JSONField(
@@ -795,18 +810,25 @@ class SlurmAssociation(AllocationExtensionMixin, PrimaryModel):
         help_text=_("Fairshare value for this association. Determines relative priority within the fairshare tree."),
     )
 
-    max_jobs = models.PositiveIntegerField(
+    max_jobs = models.IntegerField(
         blank=True,
         null=True,
+        validators=[MinValueValidator(-1)],
         verbose_name=_("max jobs"),
-        help_text=_("Maximum number of jobs that can run simultaneously in this association."),
+        help_text=_(
+            "Maximum number of jobs that can run simultaneously in this "
+            "association. Use -1 to reset the limit in Slurm."
+        ),
     )
 
-    max_submit_jobs = models.PositiveIntegerField(
+    max_submit_jobs = models.IntegerField(
         blank=True,
         null=True,
+        validators=[MinValueValidator(-1)],
         verbose_name=_("max submit jobs"),
-        help_text=_("Maximum number of jobs that can be submitted by this association."),
+        help_text=_(
+            "Maximum number of jobs that can be submitted by this association. Use -1 to reset the limit in Slurm."
+        ),
     )
 
     max_tres_per_job = models.JSONField(

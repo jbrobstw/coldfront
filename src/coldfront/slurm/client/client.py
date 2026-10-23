@@ -144,9 +144,16 @@ def _uint32_no_val(number: int | None) -> dict[str, Any] | None:
     The REST ``assoc`` schema represents numeric limits as
     ``{"set": true, "infinite": false, "number": N}`` rather than a bare int.
     Returns ``None`` for ``None`` input so callers can omit the field.
+
+    A negative value (Slurm's ``-1`` "reset the limit" sentinel) is translated
+    into the ``NO_VAL`` form ``{"set": false, "infinite": false, "number": 0}``,
+    which instructs slurmdbd to clear the limit.  Slurm then reports the field
+    as unset, which ColdFront stores back as ``NULL``.
     """
     if number is None:
         return None
+    if int(number) < 0:
+        return {"set": False, "infinite": False, "number": 0}
     return {"set": True, "infinite": False, "number": int(number)}
 
 

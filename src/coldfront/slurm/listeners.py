@@ -201,8 +201,14 @@ def on_project_user_deleted(instance, **kwargs):
     )
 
 
+# Fields written back by ``_readback_association_limits`` after a Slurm sync.
+# A save carrying only these fields is the read-back itself and must not
+# re-enqueue another sync (which would loop).
+_READBACK_FIELDS = frozenset({"max_jobs", "max_submit_jobs"})
+
+
 @receiver(post_save, sender=SlurmAssociation)
-def on_slurm_association_saved(instance, **kwargs):
+def on_slurm_association_saved(instance, update_fields=None, **kwargs):
     """
     When a SlurmAssociation is saved, sync SlurmUser records for all project
     members if the linked allocation is active.
@@ -210,6 +216,10 @@ def on_slurm_association_saved(instance, **kwargs):
     This handles the case where an admin edits a SlurmAssociation and
     changes the slurm_account on an active allocation.  The underlying
     _sync_slurm_users_for_user already handles no-ops efficiently.
+
+    Editing the association's numeric job limits (including Slurm's ``-1``
+    reset sentinel) also enqueues an activation sync so the new values are
+    pushed to Slurm and the actual stored values are read back into ColdFront.
     """
     allocation = instance.allocation
     if allocation.status != AllocationStatusChoices.STATUS_ACTIVE:
@@ -228,6 +238,15 @@ def on_slurm_association_saved(instance, **kwargs):
     # Sync QOS changes for this association
     cluster = resource if isinstance(resource, SlurmCluster) else resource.cluster
     _sync_association_qos(instance, cluster)
+
+    # Skip the limit sync when this save is the read-back writing values back
+    # from Slurm, otherwise we would enqueue an endless sync loop.
+    if update_fields is not None and set(update_fields) <= _READBACK_FIELDS:
+        return
+
+    # Push the association's limits (including a ``-1`` reset) to Slurm and read
+    # back what Slurm actually stored.
+    enqueue_activate_allocation(allocation.pk, cluster_id=cluster.pk)
 
 
 # ------------------------------------------------------------------

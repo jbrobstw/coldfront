@@ -30,6 +30,7 @@ from coldfront.slurm.sync import (
     _build_client,
     _build_config_payload,
     _build_expected_tuples,
+    _no_val_number,
     enqueue_activate_allocation,
     enqueue_deactivate_allocation,
     enqueue_remove_project_user,
@@ -80,6 +81,28 @@ _AUTO_SYNC_DEFAULT_CONFIG = {
 # ======================================================================
 # 1. SyncReport
 # ======================================================================
+
+
+class TestNoValNumber(TestCase):
+    """Test ``_no_val_number`` parsing of slurmrestd uint32_no_val structs."""
+
+    def test_none_returns_none(self):
+        assert _no_val_number(None) is None
+
+    def test_unset_returns_none(self):
+        assert _no_val_number({"set": False, "infinite": False, "number": 0}) is None
+
+    def test_infinite_returns_none(self):
+        assert _no_val_number({"set": True, "infinite": True, "number": 0}) is None
+
+    def test_set_value_returns_number(self):
+        assert _no_val_number({"set": True, "infinite": False, "number": 10}) == 10
+
+    def test_set_without_number_returns_none(self):
+        assert _no_val_number({"set": True, "infinite": False}) is None
+
+    def test_bare_int_returns_int(self):
+        assert _no_val_number(5) == 5
 
 
 class TestSyncReport(TestCase):
