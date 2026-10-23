@@ -18,6 +18,7 @@ from coldfront.slurm.choices import (
     SlurmPartitionStateChoices,
     SlurmPreemptModeChoices,
 )
+from coldfront.slurm.forms.fields import FairshareField
 from coldfront.slurm.models import SlurmAccount, SlurmAssociation, SlurmCluster, SlurmPartition, SlurmQOS, SlurmUser
 from coldfront.users.models.users import Group
 
@@ -111,10 +112,7 @@ class SlurmClusterBulkEditForm(AllocatableResourceBulkEditForm, PrimaryModelBulk
         required=False,
         label=_("QOS List"),
     )
-    fairshare = forms.IntegerField(
-        required=False,
-        label=_("Fairshare"),
-    )
+    fairshare = FairshareField(required=False)
     features = JSONField(
         label=_("Features"),
         required=False,
@@ -242,10 +240,7 @@ class SlurmPartitionBulkEditForm(AllocatableResourceBulkEditForm, PrimaryModelBu
         label=_("Max Wall Duration per Job (minutes)"),
         help_text=_("Duration in minutes"),
     )
-    fairshare = forms.IntegerField(
-        required=False,
-        label=_("Fairshare"),
-    )
+    fairshare = FairshareField(required=False)
     allow_qos = forms.ModelMultipleChoiceField(
         queryset=SlurmQOS.objects.all(),
         required=False,
@@ -360,10 +355,7 @@ class SlurmAccountBulkEditForm(PrimaryModelBulkEditForm):
         required=False,
         label=_("Cluster"),
     )
-    fairshare = forms.IntegerField(
-        required=False,
-        label=_("Fairshare"),
-    )
+    fairshare = FairshareField(required=False)
     qos_add = forms.ModelMultipleChoiceField(
         queryset=SlurmQOS.objects.all(),
         required=False,
@@ -413,10 +405,7 @@ class SlurmAssociationBulkEditForm(PrimaryModelBulkEditForm):
         required=False,
         label=_("Default QOS"),
     )
-    fairshare = forms.IntegerField(
-        required=False,
-        label=_("Fairshare"),
-    )
+    fairshare = FairshareField(required=False)
     max_jobs = forms.IntegerField(
         required=False,
         label=_("Max Jobs"),

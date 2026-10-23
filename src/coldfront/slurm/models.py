@@ -34,13 +34,15 @@ class SlurmQOS(OrganizationalModel):
     and SlurmAccount.qos_list (M2M).
     """
 
-    priority = models.PositiveIntegerField(
+    priority = models.IntegerField(
         blank=True,
         null=True,
+        validators=[MinValueValidator(-1)],
         verbose_name=_("priority"),
         help_text=_(
             "QOS priority factor. Higher values increase a job's priority "
-            "when this QOS is used. Maps to Priority in the dump format."
+            "when this QOS is used. Maps to Priority in the dump format. "
+            "Use -1 to reset the priority in Slurm."
         ),
     )
     max_submit_jobs_per_user = models.IntegerField(
@@ -99,14 +101,16 @@ class SlurmQOS(OrganizationalModel):
             "A float that is factored into an association's GrpTRES limits. Maps to LimitFactor in the dump format."
         ),
     )
-    grace_time = models.PositiveIntegerField(
+    grace_time = models.IntegerField(
         blank=True,
         null=True,
+        validators=[MinValueValidator(-1)],
         verbose_name=_("grace time"),
         help_text=_(
             "Preemption grace time in seconds. Jobs selected for preemption "
             "are given this much time before termination. "
-            "Maps to GraceTime in the dump format."
+            "Maps to GraceTime in the dump format. "
+            "Use -1 to reset the grace time in Slurm."
         ),
     )
 
@@ -164,15 +168,16 @@ class SlurmCluster(AllocatableResourceMixin, PrimaryModel):
         help_text=_("QOS options available on this cluster. Associations inherit these via QOS+= syntax."),
     )
 
-    fairshare = models.PositiveIntegerField(
+    fairshare = models.IntegerField(
         blank=True,
         default=1,
+        validators=[MinValueValidator(-1)],
         verbose_name=_("fairshare"),
         help_text=_(
             "Default fairshare value for this cluster. Used as the root "
             "association's shares_raw. All associations under this cluster "
             "inherit unless overridden. Maps to Fairshare in the dump "
-            "format."
+            "format. Use -1 (or 'parent') to inherit the parent's fairshare."
         ),
     )
 
@@ -446,14 +451,16 @@ class SlurmPartition(AllocatableResourceMixin, PrimaryModel):
         help_text=_("Maximum wall clock duration per job."),
     )
 
-    fairshare = models.PositiveIntegerField(
+    fairshare = models.IntegerField(
         blank=True,
         default=1,
+        validators=[MinValueValidator(-1)],
         verbose_name=_("fairshare"),
         help_text=_(
             "Fairshare value for this partition's associations. Determines "
             "relative priority within the fairshare tree. Higher values "
-            "allow more jobs before priority decays."
+            "allow more jobs before priority decays. "
+            "Use -1 (or 'parent') to inherit the parent's fairshare."
         ),
     )
 
@@ -664,14 +671,16 @@ class SlurmAccount(PrimaryModel):
         verbose_name=_("cluster"),
     )
 
-    fairshare = models.PositiveIntegerField(
+    fairshare = models.IntegerField(
         blank=True,
         null=True,
         default=None,
+        validators=[MinValueValidator(-1)],
         verbose_name=_("fairshare"),
         help_text=_(
             "Account-level fairshare. When set, all user associations "
             "under this account inherit via Fairshare=parent in the dump. "
+            "Use -1 (or 'parent') to inherit the parent's fairshare."
         ),
     )
 
@@ -803,11 +812,16 @@ class SlurmAssociation(AllocationExtensionMixin, PrimaryModel):
         ),
     )
 
-    fairshare = models.PositiveIntegerField(
+    fairshare = models.IntegerField(
         blank=True,
         default=1,
+        validators=[MinValueValidator(-1)],
         verbose_name=_("fairshare"),
-        help_text=_("Fairshare value for this association. Determines relative priority within the fairshare tree."),
+        help_text=_(
+            "Fairshare value for this association. Determines relative priority "
+            "within the fairshare tree. Use -1 (or 'parent') to inherit the "
+            "parent's fairshare."
+        ),
     )
 
     max_jobs = models.IntegerField(

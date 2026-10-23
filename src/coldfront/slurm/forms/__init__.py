@@ -10,6 +10,7 @@ from .bulk_edit import (
     SlurmQOSBulkEditForm,
     SlurmUserBulkEditForm,
 )
+from .fields import FairshareField
 from .filterset_forms import (
     SlurmAccountFilterSetForm,
     SlurmAccountUsageFilterSetForm,
@@ -35,6 +36,7 @@ from .model_forms import (
 )
 
 __all__ = (
+    "FairshareField",
     "SlurmQOSBulkEditForm",
     "SlurmQOSForm",
     "SlurmQOSImportForm",

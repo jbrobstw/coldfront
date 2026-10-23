@@ -19,6 +19,7 @@ from coldfront.slurm.choices import (
     SlurmPriorityTypeChoices,
     SlurmPriorityUsageResetPeriodChoices,
 )
+from coldfront.slurm.forms.fields import FairshareField
 from coldfront.slurm.models import SlurmAccount, SlurmAssociation, SlurmCluster, SlurmPartition, SlurmQOS, SlurmUser
 from coldfront.users.models.users import Group
 
@@ -109,6 +110,8 @@ class SlurmClusterForm(TenancyForm, PrimaryModelForm):
         required=False,
         label=_("QOS List"),
     )
+
+    fairshare = FairshareField(required=False)
 
     priority_flags = forms.MultipleChoiceField(
         choices=SlurmPriorityFlagsChoices,
@@ -214,6 +217,8 @@ class SlurmClusterImportForm(TenancyImportForm, PrimaryModelImportForm):
         label=_("Default QOS"),
     )
 
+    fairshare = FairshareField(required=False)
+
     default_tres_billing_weights = JSONField(
         label=_("Default TRES Billing Weights"),
         required=False,
@@ -276,6 +281,8 @@ class SlurmPartitionForm(PrimaryModelForm):
         queryset=SlurmCluster.objects.all(),
         label=_("Cluster"),
     )
+
+    fairshare = FairshareField(required=False)
 
     schema = JSONField(
         label=_("Schema"),
@@ -426,6 +433,8 @@ class SlurmPartitionImportForm(PrimaryModelImportForm):
         label=_("Cluster"),
     )
 
+    fairshare = FairshareField(required=False)
+
     class Meta:
         model = SlurmPartition
         fields = [
@@ -459,6 +468,8 @@ class SlurmAccountForm(PrimaryModelForm):
         queryset=SlurmCluster.objects.all(),
         label=_("Cluster"),
     )
+
+    fairshare = FairshareField(required=False)
 
     qos_add = forms.ModelMultipleChoiceField(
         queryset=SlurmQOS.objects.all(),
@@ -509,6 +520,8 @@ class SlurmAccountImportForm(PrimaryModelImportForm):
         label=_("Cluster"),
     )
 
+    fairshare = FairshareField(required=False)
+
     class Meta:
         model = SlurmAccount
         fields = [
@@ -545,6 +558,8 @@ class SlurmAssociationForm(PrimaryModelForm):
         required=False,
         label=_("Default QOS"),
     )
+
+    fairshare = FairshareField(required=False)
 
     max_tres_per_job = JSONField(
         label=_("Max TRES per Job"),
@@ -652,6 +667,8 @@ class SlurmAssociationImportForm(PrimaryModelImportForm):
         required=False,
         label=_("QOS Remove"),
     )
+
+    fairshare = FairshareField(required=False)
 
     class Meta:
         model = SlurmAssociation
