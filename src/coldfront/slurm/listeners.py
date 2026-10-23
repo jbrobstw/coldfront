@@ -9,6 +9,7 @@ from coldfront.flows import register_target_callback, register_transition_permis
 from coldfront.ras.choices import AllocationStatusChoices
 from coldfront.ras.flows import AllocationStatusFlow
 from coldfront.ras.models import Allocation, Project, ProjectUser
+from coldfront.slurm.expiry import dispatch_expiry
 from coldfront.slurm.models import (
     SlurmAccount,
     SlurmAssociation,
@@ -355,8 +356,12 @@ def on_allocation_activated(allocation, *, source, target):
 @register_target_callback(AllocationStatusFlow, AllocationStatusChoices.STATUS_EXPIRED)
 def on_allocation_expired(allocation, *, source, target):
     """
-    On allocation expired: enqueue deactivation to kill jobs and remove
-    associations from Slurm.
+    On allocation expired: dispatch the cluster's configured expiry strategy.
+
+    Expiry representation is pluggable (remove associations, throttle, hold,
+    custom fields, no-op, or a plugin-provided strategy).  The effective
+    strategy is resolved per-cluster with a fallback to the global
+    ``SLURM_EXPIRY_STRATEGY`` setting.
     """
     resource = allocation.resource_object
     if resource is None:
@@ -364,7 +369,7 @@ def on_allocation_expired(allocation, *, source, target):
     if not isinstance(resource, (SlurmCluster, SlurmPartition)):
         return
     cluster = resource if isinstance(resource, SlurmCluster) else resource.cluster
-    enqueue_deactivate_allocation(allocation.pk, cluster_id=cluster.pk)
+    dispatch_expiry(allocation, cluster)
 
 
 @register_target_callback(AllocationStatusFlow, AllocationStatusChoices.STATUS_REVOKED)

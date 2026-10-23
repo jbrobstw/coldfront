@@ -64,6 +64,9 @@ __all__ = (
     "_run_usage_sync",
     "enqueue_activate_allocation",
     "enqueue_deactivate_allocation",
+    "enqueue_throttle_allocation",
+    "enqueue_hold_allocation",
+    "enqueue_set_fields_allocation",
     "enqueue_remove_project_user",
     "import_cluster_from_conf",
     "import_cluster_from_api",
@@ -467,6 +470,218 @@ def _run_deactivate_allocation(*, allocation_id: int) -> SyncReport:
 
     report.success = len(report.errors) == 0
     return report
+
+
+# ---------------------------------------------------------------------------
+# Expiry-strategy workers (modify, not remove)
+# ---------------------------------------------------------------------------
+
+
+def _run_modify_allocation_associations(
+    *,
+    allocation_id: int,
+    serialize_overrides: dict[str, Any],
+    kill_jobs: bool = False,
+    description: str = "modify",
+) -> SyncReport:
+    """Re-POST an allocation's user associations with modified limits/QOS.
+
+    Because ``POST /slurmdb/{version}/associations/`` is an upsert, this issues
+    an association payload per project member carrying only the keyword
+    arguments in ``serialize_overrides`` (passed through to
+    :meth:`SlurmClient.serialize_association`).  Membership and the account are
+    left intact — only the association's limits/QOS change.  This is the shared
+    worker behind the ``throttle``, ``hold`` and ``set_fields`` expiry
+    strategies.
+    """
+    report = SyncReport(cluster="", success=False)
+
+    try:
+        allocation = Allocation.objects.get(pk=allocation_id)
+    except Allocation.DoesNotExist:
+        report.errors.append(f"Allocation {allocation_id} not found")
+        return report
+
+    resource = allocation.resource_object
+    if resource is None:
+        report.errors.append(f"Allocation {allocation_id} has no resource")
+        return report
+
+    if isinstance(resource, SlurmCluster):
+        cluster = resource
+    elif isinstance(resource, SlurmPartition):
+        cluster = resource.cluster
+    else:
+        report.errors.append(f"Allocation {allocation_id} targets non-slurm resource")
+        return report
+
+    report.cluster = cluster.name
+
+    client = _build_client(cluster)
+    if client is None:
+        report.errors.append("slurmrestd not configured (SLURMRESTD_URL is empty)")
+        return report
+
+    try:
+        association = SlurmAssociation.objects.get(allocation=allocation)
+    except SlurmAssociation.DoesNotExist:
+        report.success = True
+        return report
+
+    slurm_account = association.slurm_account
+    if slurm_account is None:
+        report.success = True
+        return report
+
+    partition_name = resource.name if isinstance(resource, SlurmPartition) else ""
+
+    for user in _iter_project_members(allocation.project):
+        if kill_jobs:
+            _kill_user_jobs(client, user, slurm_account, partition_name)
+
+        payload = SlurmClient.serialize_association(
+            account=slurm_account.name,
+            user=user.username,
+            cluster=cluster.name,
+            partition=partition_name,
+            **serialize_overrides,
+        )
+        try:
+            client.create_associations([payload])
+            report.associations_updated += 1
+        except Exception as exc:
+            report.errors.append(f"Failed to {description} association for {user.username}: {exc}")
+
+    # Trigger slurmctld cache refresh
+    _reconfigure(client)
+
+    report.success = len(report.errors) == 0
+    return report
+
+
+def enqueue_throttle_allocation(allocation_id: int, cluster_id: int | None = None) -> None:
+    """Enqueue a task that throttles an expired allocation to zero jobs.
+
+    Sets ``max_jobs=0`` and ``max_submit_jobs=0`` on every association for the
+    allocation (no running or pending jobs), leaving account membership and
+    user associations in place.  Respects the per-cluster ``auto_sync_enabled``
+    gate.
+    """
+    cluster = SlurmCluster.objects.get(pk=cluster_id) if cluster_id is not None else None
+    if not _auto_sync_enabled(cluster):
+        logger.debug(
+            "Slurm auto sync disabled — skipping throttle enqueue for allocation %s",
+            allocation_id,
+        )
+        return
+
+    logger.info("Enqueuing Slurm throttle for allocation %s", allocation_id)
+    Job.enqueue(
+        "coldfront.slurm.sync._run_throttle_allocation",
+        name=f"SlurmThrottle:allocation-{allocation_id}",
+        priority=3,
+        allocation_id=allocation_id,
+    )
+
+
+def _run_throttle_allocation(*, allocation_id: int) -> SyncReport:
+    """Worker: set GrpJobs=0 / GrpSubmitJobs=0 on an expired allocation."""
+    return _run_modify_allocation_associations(
+        allocation_id=allocation_id,
+        serialize_overrides={"max_jobs": 0, "max_submit_jobs": 0},
+        kill_jobs=True,
+        description="throttle",
+    )
+
+
+def enqueue_hold_allocation(allocation_id: int, cluster_id: int | None = None, *, hold_qos: str | None = None) -> None:
+    """Enqueue a task that moves an expired allocation onto a frozen QOS.
+
+    Sets each association's QOS to ``hold_qos`` (a QOS the site configures to
+    block new work) without removing associations.  Respects the per-cluster
+    ``auto_sync_enabled`` gate.
+    """
+    cluster = SlurmCluster.objects.get(pk=cluster_id) if cluster_id is not None else None
+    if not _auto_sync_enabled(cluster):
+        logger.debug(
+            "Slurm auto sync disabled — skipping hold enqueue for allocation %s",
+            allocation_id,
+        )
+        return
+
+    if not hold_qos:
+        logger.warning(
+            "No hold QOS configured — skipping hold enqueue for allocation %s",
+            allocation_id,
+        )
+        return
+
+    logger.info("Enqueuing Slurm hold for allocation %s (qos=%s)", allocation_id, hold_qos)
+    Job.enqueue(
+        "coldfront.slurm.sync._run_hold_allocation",
+        name=f"SlurmHold:allocation-{allocation_id}",
+        priority=3,
+        allocation_id=allocation_id,
+        hold_qos=hold_qos,
+    )
+
+
+def _run_hold_allocation(*, allocation_id: int, hold_qos: str) -> SyncReport:
+    """Worker: set each association's QOS to the configured frozen QOS."""
+    return _run_modify_allocation_associations(
+        allocation_id=allocation_id,
+        serialize_overrides={"qoslevel": [hold_qos], "default_qos": hold_qos},
+        kill_jobs=True,
+        description="hold",
+    )
+
+
+def enqueue_set_fields_allocation(
+    allocation_id: int,
+    cluster_id: int | None = None,
+    *,
+    fields: dict[str, Any] | None = None,
+) -> None:
+    """Enqueue a task that applies arbitrary association limit overrides.
+
+    ``fields`` is a mapping of :meth:`SlurmClient.serialize_association` keyword
+    arguments (e.g. ``{"max_jobs": 0, "grp_tres": {"cpu": 0}}``) applied to
+    every association for the allocation.  Respects the per-cluster
+    ``auto_sync_enabled`` gate.
+    """
+    cluster = SlurmCluster.objects.get(pk=cluster_id) if cluster_id is not None else None
+    if not _auto_sync_enabled(cluster):
+        logger.debug(
+            "Slurm auto sync disabled — skipping set_fields enqueue for allocation %s",
+            allocation_id,
+        )
+        return
+
+    if not fields:
+        logger.warning(
+            "No set_fields configured — skipping set_fields enqueue for allocation %s",
+            allocation_id,
+        )
+        return
+
+    logger.info("Enqueuing Slurm set_fields for allocation %s", allocation_id)
+    Job.enqueue(
+        "coldfront.slurm.sync._run_set_fields_allocation",
+        name=f"SlurmSetFields:allocation-{allocation_id}",
+        priority=3,
+        allocation_id=allocation_id,
+        fields=fields,
+    )
+
+
+def _run_set_fields_allocation(*, allocation_id: int, fields: dict[str, Any]) -> SyncReport:
+    """Worker: apply arbitrary serialize_association overrides to an allocation."""
+    return _run_modify_allocation_associations(
+        allocation_id=allocation_id,
+        serialize_overrides=dict(fields),
+        kill_jobs=False,
+        description="set_fields",
+    )
 
 
 def _run_remove_project_user(*, project_id: int, user_id: int) -> SyncReport:

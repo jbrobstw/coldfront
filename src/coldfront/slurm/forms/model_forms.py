@@ -117,6 +117,33 @@ class SlurmClusterForm(TenancyForm, PrimaryModelForm):
         help_text=_("Raw PriorityFlags from slurm.conf. Used to derive billing_mode (MAX_TRES / MAX_TRES_GRES)."),
     )
 
+    expiry_strategy = forms.ChoiceField(
+        required=False,
+        label=_("Expiry Strategy"),
+        help_text=_(
+            "How expired allocations are represented in Slurm on this cluster. "
+            "Leave blank to use the global default. Choices include built-in "
+            "and plugin-provided strategies."
+        ),
+    )
+
+    expiry_set_fields = JSONField(
+        label=_("Expiry Set Fields"),
+        required=False,
+        help_text=_(
+            "Association field overrides for the 'set_fields' strategy, as "
+            'serialize_association keyword arguments (e.g. {"max_jobs": 0}).'
+        ),
+    )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from coldfront.slurm.expiry import strategy_choices
+
+        self.fields["expiry_strategy"].choices = [("", _("(use global default)"))] + [
+            (name, label) for name, label in strategy_choices()
+        ]
+
     class Meta:
         model = SlurmCluster
         fields = [
@@ -137,6 +164,9 @@ class SlurmClusterForm(TenancyForm, PrimaryModelForm):
             "priority_decay_half_life",
             "priority_usage_reset_period",
             "enforce_su_limits",
+            "expiry_strategy",
+            "expiry_hold_qos",
+            "expiry_set_fields",
             "tags",
         ]
 
@@ -166,6 +196,12 @@ class SlurmClusterForm(TenancyForm, PrimaryModelForm):
                 "priority_decay_half_life",
                 "priority_usage_reset_period",
                 "enforce_su_limits",
+            ),
+            Fieldset(
+                _("Allocation Expiry"),
+                "expiry_strategy",
+                "expiry_hold_qos",
+                "expiry_set_fields",
             ),
         ]
 
@@ -206,6 +242,11 @@ class SlurmClusterImportForm(TenancyImportForm, PrimaryModelImportForm):
         label=_("Priority Usage Reset Period"),
     )
 
+    expiry_set_fields = JSONField(
+        label=_("Expiry Set Fields"),
+        required=False,
+    )
+
     class Meta:
         model = SlurmCluster
         fields = [
@@ -223,6 +264,9 @@ class SlurmClusterImportForm(TenancyImportForm, PrimaryModelImportForm):
             "priority_type",
             "priority_decay_half_life",
             "priority_usage_reset_period",
+            "expiry_strategy",
+            "expiry_hold_qos",
+            "expiry_set_fields",
             "tags",
         ]
 

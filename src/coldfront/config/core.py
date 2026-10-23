@@ -43,6 +43,18 @@ INVITE_CODE_EXPIRE_SECONDS = ENV.int("INVITE_CODE_EXPIRE_SECONDS", default=86400
 # invites indefinitely.
 ACCEPTED_INVITE_RETENTION = ENV.int("ACCEPTED_INVITE_RETENTION", default=90)
 
+# When enabled, ExpireAllocationsJob periodically transitions ACTIVE allocations
+# whose end_date has passed to EXPIRED via the allocation status workflow. The
+# transition fires the normal status-change signal and target callbacks, so each
+# resource type / plugin decides how an expired allocation is represented on its
+# backend. Expiry happens exactly at end_date (no grace period). A plugin may
+# veto expiry for a given allocation by registering an "expire" transition
+# permission callback.
+ALLOCATION_AUTO_EXPIRE_ENABLED = ENV.bool("ALLOCATION_AUTO_EXPIRE_ENABLED", default=True)
+
+# How often (in minutes) ExpireAllocationsJob runs. Defaults to daily.
+ALLOCATION_AUTO_EXPIRE_JOB_INTERVAL = ENV.int("ALLOCATION_AUTO_EXPIRE_JOB_INTERVAL", default=1440)
+
 
 EXEMPT_VIEW_PERMISSIONS = []
 CHANGELOG_SKIP_EMPTY_CHANGES = True

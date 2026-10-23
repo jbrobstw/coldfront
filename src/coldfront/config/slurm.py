@@ -57,3 +57,22 @@ SLURMRESTD_CLUSTERS = ENV.dict(
 # (daily).  Can be set lower for more frequent convergence, at the cost of
 # increased slurmrestd load.
 SLURM_SYNC_INTERVAL = ENV.int("COLDFRONT_SLURM_SYNC_INTERVAL", default=1440)
+
+# ------------------------------------------------------------------------------
+# Allocation expiry representation (global defaults)
+# ------------------------------------------------------------------------------
+
+# How expired allocations are represented in Slurm, when a cluster does not
+# set its own ``expiry_strategy``.  Must be a registered strategy name (see
+# ``coldfront.slurm.expiry``).  Built-ins: "remove_associations" (default,
+# historical behavior), "throttle", "hold", "set_fields", "noop".  Plugins may
+# register additional strategies.
+SLURM_EXPIRY_STRATEGY = ENV.str("COLDFRONT_SLURM_EXPIRY_STRATEGY", default="remove_associations")
+
+# Fallback QOS name for the "hold" strategy when a cluster does not set its
+# own ``expiry_hold_qos``.
+SLURM_EXPIRY_HOLD_QOS = ENV.str("COLDFRONT_SLURM_EXPIRY_HOLD_QOS", default="")
+
+# Fallback ``serialize_association`` keyword overrides for the "set_fields"
+# strategy when a cluster does not set its own ``expiry_set_fields``.
+SLURM_EXPIRY_SET_FIELDS = ENV.dict("COLDFRONT_SLURM_EXPIRY_SET_FIELDS", default={})

@@ -268,6 +268,45 @@ class SlurmCluster(AllocatableResourceMixin, PrimaryModel):
         ),
     )
 
+    # --- Allocation expiry representation (ColdFront-only) ---
+
+    expiry_strategy = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name=_("expiry strategy"),
+        help_text=_(
+            "How expired allocations are represented in Slurm on this cluster. "
+            "Leave blank to use the global SLURM_EXPIRY_STRATEGY default. "
+            "Choices are populated from the registered expiry strategies "
+            "(built-in and plugin-provided)."
+        ),
+    )
+
+    expiry_hold_qos = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        verbose_name=_("expiry hold QOS"),
+        help_text=_(
+            "QOS name applied to associations by the 'hold' expiry strategy. "
+            "Leave blank to use the global SLURM_EXPIRY_HOLD_QOS default."
+        ),
+    )
+
+    expiry_set_fields = models.JSONField(
+        blank=True,
+        null=True,
+        default=dict,
+        verbose_name=_("expiry set fields"),
+        help_text=_(
+            "Association field overrides applied by the 'set_fields' expiry "
+            "strategy, as serialize_association keyword arguments "
+            '(e.g. {"max_jobs": 0, "grp_tres": {"cpu": 0}}). Leave blank to '
+            "use the global SLURM_EXPIRY_SET_FIELDS default."
+        ),
+    )
+
     clone_fields = (
         "locked",
         "tenant",
@@ -282,6 +321,9 @@ class SlurmCluster(AllocatableResourceMixin, PrimaryModel):
         "priority_decay_half_life",
         "priority_usage_reset_period",
         "enforce_su_limits",
+        "expiry_strategy",
+        "expiry_hold_qos",
+        "expiry_set_fields",
     )
 
     class Meta:
