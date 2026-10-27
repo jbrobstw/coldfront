@@ -102,13 +102,13 @@ class ProjectUserForm(PrimaryModelForm):
         current_value = None
         current_label = None
 
-        if self.instance.pk and self.instance.user_id:
-            current_value = user_to_candidate_token(self.instance.user)
-            current_label = str(self.instance.user)
-        elif self.is_bound:
+        if self.is_bound:
             current_value = self.data.get(self.add_prefix("user"))
             if current_value:
                 current_label = candidate_label_from_token(current_value)
+        elif self.instance.pk and self.instance.user_id:
+            current_value = user_to_candidate_token(self.instance.user)
+            current_label = str(self.instance.user)
 
         if current_value:
             self.fields["user"].choices = [(current_value, current_label or current_value)]
