@@ -25,6 +25,7 @@ from coldfront.ras.models.change_requests import (
     AllocationChangeRequest,
 )
 from coldfront.tenancy.models import Tenant
+from coldfront.users.directory import user_to_candidate_token
 from coldfront.users.models import ObjectPermission, User
 from coldfront.utils.testing import ViewTestCases, create_tags
 from coldfront.utils.testing.utils import disable_warnings, post_data
@@ -233,6 +234,9 @@ class AllocationTestCase(ViewTestCases.PrimaryObjectViewTestCase):
 
 class ProjectUserTestCase(ViewTestCases.PrimaryObjectViewTestCase):
     model = ProjectUser
+    # "user" is submitted as a signed candidate token, so the raw form value does
+    # not match the stored FK pk and cannot be compared directly.
+    validation_excluded_fields = ("user",)
 
     @classmethod
     def setUpTestData(cls):
@@ -264,7 +268,7 @@ class ProjectUserTestCase(ViewTestCases.PrimaryObjectViewTestCase):
 
         cls.form_data = {
             "project": projects[1].pk,
-            "user": users[0].pk,
+            "user": user_to_candidate_token(users[0]),
         }
 
         cls.csv_data = (
@@ -289,7 +293,6 @@ class ProjectUserTestCase(ViewTestCases.PrimaryObjectViewTestCase):
     def test_add_view_mirrors_new_member_into_project_group(self):
         # Regression: creating a ProjectUser via the add view must add the user to
         # the project's group (this was skipped on the create path).
-        from coldfront.users.directory import user_to_candidate_token
         from coldfront.users.models import Group
 
         self.add_permissions("ras.add_projectuser")
