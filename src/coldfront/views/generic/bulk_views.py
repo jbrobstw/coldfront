@@ -220,6 +220,14 @@ class BulkImportView(GetReturnURLMixin, BaseMultiObjectView):
                 error_messages.append(f"Record {index} {prefix}{field_name}: {err}")
         return error_messages
 
+    def _parse_object_id(self, raw_id, index):
+        try:
+            return int(raw_id)
+        except (TypeError, ValueError):
+            raise ValidationError(
+                self._compile_form_errors({"id": [_("{value} is not a valid ID").format(value=raw_id)]}, index=index)
+            )
+
     def _save_object(self, model_form, request, parent_idx):
         _action = "Updated" if model_form.instance.pk else "Created"
 
@@ -286,7 +294,7 @@ class BulkImportView(GetReturnURLMixin, BaseMultiObjectView):
         saved_objects = []
 
         for i, record in enumerate(records, start=1):
-            object_id = int(record.pop("id")) if record.get("id") else None
+            object_id = self._parse_object_id(record.pop("id"), i) if record.get("id") else None
 
             # Determine whether this object is being created or updated
             if object_id:
@@ -349,7 +357,9 @@ class BulkImportView(GetReturnURLMixin, BaseMultiObjectView):
         records = list(form.cleaned_data["data"])
 
         # Prefetch objects to be updated, if any
-        prefetch_ids = [int(record["id"]) for record in records if record.get("id")]
+        prefetch_ids = [
+            self._parse_object_id(record["id"], i) for i, record in enumerate(records, start=1) if record.get("id")
+        ]
 
         # check for duplicate IDs
         duplicate_pks = [pk for pk, count in Counter(prefetch_ids).items() if count > 1]

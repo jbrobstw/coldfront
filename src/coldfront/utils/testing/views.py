@@ -632,6 +632,35 @@ class ViewTestCases:
                         if value is not None and not isinstance(field, ForeignKey):
                             self.assertEqual(value, value)
 
+        @override_settings(EXEMPT_VIEW_PERMISSIONS=["*"])
+        def test_bulk_update_objects_with_invalid_id(self):
+            if not hasattr(self, "csv_update_data"):
+                raise NotImplementedError(_("The test must define csv_update_data."))
+
+            # Replace the id of the first update row with a non-integer value
+            array, _csv_data = self._get_update_csv_data()
+            header, first_row, *rest = array
+            first_row = ",".join(["not-an-int", *first_row.split(",")[1:]])
+            data = {
+                "format": ImportFormatChoices.CSV,
+                "data": "\n".join([header, first_row, *rest]),
+                "csv_delimiter": CSVDelimiterChoices.AUTO,
+            }
+
+            # Assign model-level permission
+            obj_perm = ObjectPermission(name="Test permission", actions=["add"])
+            obj_perm.save()
+            obj_perm.users.add(self.user)
+            obj_perm.object_types.add(ObjectType.objects.get_for_model(self.model))
+
+            initial_count = self._get_queryset().count()
+
+            # An invalid id should surface a form error (200), not crash with a 500
+            response = self.client.post(self._get_url("bulk_import"), data)
+            self.assertHttpStatus(response, 200)
+            self.assertContains(response, "not a valid ID")
+            self.assertEqual(initial_count, self._get_queryset().count())
+
         @override_settings(EXEMPT_VIEW_PERMISSIONS=["*"], EXEMPT_EXCLUDE_MODELS=[])
         def test_bulk_import_objects_with_constrained_permission(self, post_import_callback=None):
             # Assign constrained permission (deny all initially)

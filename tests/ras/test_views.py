@@ -1347,6 +1347,10 @@ class ProjectInviteTestCase(
         """Bulk import only supports adding not updating so we skip this test"""
         pass
 
+    def test_bulk_update_objects_with_invalid_id(self):
+        """Bulk import only supports adding not updating so we skip this test"""
+        pass
+
 
 class ProjectInviteAcceptViewTest(ModelViewTestCase):
     """Tests for the public invite-acceptance view."""
