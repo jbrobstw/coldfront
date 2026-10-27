@@ -260,9 +260,9 @@ class ProjectUserEditView(generic.ObjectEditView):
 
     def post(self, request, *args, **kwargs):
         response = super().post(request, *args, **kwargs)
-        # Sync group membership after successful save
-        obj = self.get_object(**kwargs)
-        if obj.pk:
+        # self.object is only set when the save succeeded (add or edit).
+        obj = getattr(self, "object", None)
+        if obj is not None and obj.pk:
             _sync_add_member(obj.project, obj.user)
         return response
 

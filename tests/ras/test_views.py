@@ -27,7 +27,7 @@ from coldfront.ras.models.change_requests import (
 from coldfront.tenancy.models import Tenant
 from coldfront.users.models import ObjectPermission, User
 from coldfront.utils.testing import ViewTestCases, create_tags
-from coldfront.utils.testing.utils import disable_warnings
+from coldfront.utils.testing.utils import disable_warnings, post_data
 from coldfront.utils.testing.views import ModelViewTestCase
 
 
@@ -284,6 +284,30 @@ class ProjectUserTestCase(ViewTestCases.PrimaryObjectViewTestCase):
         cls.bulk_edit_form_data = {
             "project": projects[2].pk,
         }
+
+    @override_settings(EXEMPT_VIEW_PERMISSIONS=["*"], EXEMPT_EXCLUDE_MODELS=[])
+    def test_add_view_mirrors_new_member_into_project_group(self):
+        # Regression: creating a ProjectUser via the add view must add the user to
+        # the project's group (this was skipped on the create path).
+        from coldfront.users.directory import user_to_candidate_token
+        from coldfront.users.models import Group
+
+        self.add_permissions("ras.add_projectuser")
+
+        group = Group.objects.create(name="ras-add-mirror-group")
+        project = Project.objects.create(name="Grouped Project", owner=self.user, group=group)
+        user = User.objects.create(username="new-member")
+
+        self.assertHttpStatus(
+            self.client.post(
+                self._get_url("add"),
+                data=post_data({"project": project.pk, "user": user_to_candidate_token(user)}),
+            ),
+            302,
+        )
+
+        self.assertTrue(ProjectUser.objects.filter(project=project, user=user).exists())
+        self.assertIn(user, group.users.all())
 
 
 class AllocationChangeRequestTestCase(
