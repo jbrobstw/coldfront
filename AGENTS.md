@@ -9,7 +9,7 @@ ColdFront is an open-source **resource and allocation management system** for hi
 ## Architecture Overview
 
 ### Tech Stack
-- **Language:** Python 3.12+
+- **Language:** Python >=3.12 (CI tests both **3.12 and 3.13** — both must pass)
 - **Framework:** Django 6.x (with django-vite, django-cotton, django-tables2, django-viewflow, django-filter, etc.)
 - **Database:** SQLite/MySQL/PostgreSQL (via django-environ)
 - **Frontend:** Django templates with HTMX, django-vite, Bootstrap 5 (via django-crispy-forms & crispy-bootstrap5)
@@ -17,6 +17,7 @@ ColdFront is an open-source **resource and allocation management system** for hi
 - **Task Queue:** django-rq + django-tasks (DB-backed by default, Redis-backed optional)
 - **Workflow Engine:** django-viewflow (FSM-based status workflows)
 - **Package Manager:** uv (Python >=3.12)
+- **Frontend tooling:** Node **24.x** (CI requirement), npm
 - **Testing:** pytest, coverage, factory-boy
 - **Linting:** ruff
 - **Template formatting:** djangofmt
@@ -31,6 +32,8 @@ ColdFront is an open-source **resource and allocation management system** for hi
 | `core` | Foundational models — CustomFields, Tags, ObjectTypes, ChangeLog, Jobs, Notifications, SavedFilters, TableConfigs, CustomLinks, Comments |
 | `users` | User/Group management, permissions, API tokens, roles, user preferences |
 | `tenancy` | Multi-tenant Tenant/TenantGroup management |
+| `billing` | Billing integration — invoice/PDF generation, billing notifications, billing flows |
+| `ris` | Research Information System — publication/grant lookups via ORCID, Crossref, and NSF providers |
 | `account` | User account management (login/logout, proxy UserToken model) |
 | `auth` | Authentication backends (LDAP, FreeIPA, mokey, OIDC) |
 | `api` | REST API viewsets, serializers, authentication, pagination, renderers |
@@ -97,11 +100,14 @@ uv run ruff check
 # Python formatting
 uv run ruff format --check
 
-# Django template formatting
+# Django template formatting (output MUST be committed — CI fails otherwise)
 uv run djangofmt src/coldfront/
 
 # Frontend TypeScript (ESLint & Prettier)
 npm --prefix src/coldfront/static run check
+
+# Frontend bundle (bundled assets MUST be committed — CI fails otherwise)
+npm --prefix src/coldfront/static run build
 
 # License compliance
 uv run reuse lint
@@ -109,6 +115,10 @@ uv run reuse lint
 # Pending migrations
 uv run coldfront makemigrations --check
 ```
+
+> **CI gate:** After running `djangofmt` and `npm run build`, CI runs `git status --porcelain`
+> and **fails if anything is uncommitted**. Always commit regenerated templates and bundled
+> static assets.
 
 ### Auto-fix and format
 
@@ -120,15 +130,19 @@ uv run djangofmt src/coldfront/
 
 ### Testing
 
+Tests run with **pytest** (not Django's test runner — `uv run coldfront test` in
+`CONTRIBUTING.md` is stale). `COLDFRONT_ENV=.env.testing` selects the test env file,
+which sets `PLUGINS` (dummy_plugin + ris providers) and test secrets.
+
 ```bash
-# Full test suite
+# Full test suite (exact CI command)
+COLDFRONT_ENV=.env.testing uv run -m coverage run -m pytest
+
+# Full test suite (quick local run, no coverage)
 COLDFRONT_ENV=.env.testing uv run -m pytest
 
 # Single test file
 COLDFRONT_ENV=.env.testing uv run -m pytest tests/<app>/test_views.py
-
-# With coverage
-COLDFRONT_ENV=.env.testing uv run -m coverage run -m pytest
 ```
 
 ### Development Setup
@@ -214,6 +228,8 @@ tests/<app>/
 
 5. **API tests for models with FK fields need `create_data` with correct FK PKs.** Pre-create related objects in `setUpTestData` and use their PKs.
 
+6. **Always run tests with `COLDFRONT_ENV=.env.testing`.** The pytest config in `pyproject.toml` (`[tool.pytest.ini_options]`) sets `DJANGO_SETTINGS_MODULE`, but `.env.testing` supplies the test secrets and `PLUGINS` list the suite depends on. Omitting it causes failures or wrong plugin state.
+
 ---
 
 ## Key Patterns
@@ -274,8 +290,10 @@ Menus are defined in `src/coldfront/navigation/menu.py`. Each app registers menu
 
 ### License Headers
 
-Every file must include an SPDX license header:
+Every file must include an SPDX license header. Files carried over from the original
+project use two copyright lines; new files use the single University at Buffalo line.
 ```python
+# SPDX-FileCopyrightText: (C) DigitalOcean, LLC
 # SPDX-FileCopyrightText: (C) University at Buffalo
 #
 # SPDX-License-Identifier: Apache-2.0

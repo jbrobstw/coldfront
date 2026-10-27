@@ -52,7 +52,7 @@ You are encouraged to use Python's type annotations to improve code readability 
 
 All new and changed features must include unit tests to verify that they work correctly. Every non-trivial function should have at least as many test cases as its cyclomatic complexity to verify all independent code paths in the function operate correctly.
 
-When using [uv](https://docs.astral.sh/uv/), the full test suite can be run using the command `uv run coldfront test`.
+The test suite runs with [pytest](https://docs.pytest.org/). When using [uv](https://docs.astral.sh/uv/), run the full suite with `COLDFRONT_ENV=.env.testing uv run -m pytest`.
 
 #### Formatting and Linting
 

@@ -135,7 +135,7 @@ select = ["E4", "E7", "E9", "F", "I"]
 indent-style = "space"
 docstring-code-format = true
 
-[tool.pytest]
+[tool.pytest.ini_options]
 minversion = "9.0"
 DJANGO_SETTINGS_MODULE = "coldfront.config.settings"
 testpaths = ["tests"]
