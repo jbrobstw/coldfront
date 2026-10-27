@@ -261,7 +261,7 @@ class TestEnqueueWrappers(TestCase):
                 mock_job.enqueue.assert_called_once()
                 args, kwargs = mock_job.enqueue.call_args
                 assert args[0] == "coldfront.slurm.sync._run_activate_allocation"
-                assert kwargs["kwargs"]["allocation_id"] == 42
+                assert kwargs["allocation_id"] == 42
                 assert kwargs["priority"] == 3
 
     def test_enqueue_activate_disabled_with_cluster_id(self):
@@ -318,7 +318,7 @@ class TestEnqueueWrappers(TestCase):
                 mock_job.enqueue.assert_called_once()
                 args, kwargs = mock_job.enqueue.call_args
                 assert args[0] == "coldfront.slurm.sync._run_deactivate_allocation"
-                assert kwargs["kwargs"]["allocation_id"] == 42
+                assert kwargs["allocation_id"] == 42
 
     def test_enqueue_deactivate_disabled_with_cluster_id(self):
         """When a specific cluster has auto_sync_enabled=False, no enqueue."""
@@ -355,8 +355,8 @@ class TestEnqueueWrappers(TestCase):
                 mock_job.enqueue.assert_called_once()
                 args, kwargs = mock_job.enqueue.call_args
                 assert args[0] == "coldfront.slurm.sync._run_remove_project_user"
-                assert kwargs["kwargs"]["project_id"] == 10
-                assert kwargs["kwargs"]["user_id"] == 20
+                assert kwargs["project_id"] == 10
+                assert kwargs["user_id"] == 20
 
     def test_enqueue_remove_project_user_with_cluster_ids_disabled(self):
         """When cluster_ids provided and none have auto_sync, no enqueue."""
@@ -395,8 +395,8 @@ class TestEnqueueWrappers(TestCase):
                     mock_job.enqueue.assert_called_once()
                     args, kwargs = mock_job.enqueue.call_args
                     assert args[0] == "coldfront.slurm.sync._run_remove_project_user"
-                    assert kwargs["kwargs"]["project_id"] == 10
-                    assert kwargs["kwargs"]["user_id"] == 20
+                    assert kwargs["project_id"] == 10
+                    assert kwargs["user_id"] == 20
 
 
 # ======================================================================
