@@ -121,10 +121,7 @@ class SlurmAccountTable(PrimaryModelTable):
         verbose_name=_("Name"),
         linkify=True,
     )
-    cluster = tables.Column(
-        verbose_name=_("Cluster"),
-        linkify=True
-    )
+    cluster = tables.Column(verbose_name=_("Cluster"), linkify=True)
     service_units = tables.Column(
         verbose_name=_("Service Units"),
     )
