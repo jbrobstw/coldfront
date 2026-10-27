@@ -151,7 +151,7 @@ class ProjectInvite(ChangeLoggedModel):
         self.accepted_at = timezone.now()
         self.save()
 
+        # Mirroring into the project's group is handled by the ProjectUser
+        # post_save signal in coldfront.ras.signals.
         ProjectUser.objects.get_or_create(project=self.project, user=user)
-        if self.project.group:
-            self.project.group.add_member(user)
         return True

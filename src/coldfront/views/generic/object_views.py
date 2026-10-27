@@ -248,8 +248,6 @@ class ObjectEditView(GetReturnURLMixin, BaseObjectView):
                 with transaction.atomic(using=router.db_for_write(model)):
                     object_created = form.instance.pk is None
                     obj = form.save()
-                    # Expose the saved instance so subclasses can hook post-save on add and edit.
-                    self.object = obj
 
                     # Check that the new object conforms with any assigned object-level permissions
                     if not self.queryset.filter(pk=obj.pk).exists():

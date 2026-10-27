@@ -17,19 +17,6 @@ from coldfront.views import ViewTab, generic
 from coldfront.views.mixins import GetRelatedModelsMixin
 from coldfront.views.object_actions import BulkDelete, BulkExport
 
-
-def _sync_add_member(project, user):
-    """If the project has a group FK set, add the user to it."""
-    if project.group:
-        project.group.add_member(user)
-
-
-def _sync_remove_member(project, user):
-    """If the project has a group FK set, remove the user from it."""
-    if project.group:
-        project.group.remove_member(user)
-
-
 #
 # Projects
 #
@@ -258,39 +245,16 @@ class ProjectUserEditView(generic.ObjectEditView):
         obj = super().alter_object(obj, request, url_args, url_kwargs)
         return obj
 
-    def post(self, request, *args, **kwargs):
-        response = super().post(request, *args, **kwargs)
-        # self.object is only set when the save succeeded (add or edit).
-        obj = getattr(self, "object", None)
-        if obj is not None and obj.pk:
-            _sync_add_member(obj.project, obj.user)
-        return response
-
 
 @register_model_view(ProjectUser, "delete")
 class ProjectUserDeleteView(generic.ObjectDeleteView):
     queryset = ProjectUser.objects.all()
-
-    def post(self, request, *args, **kwargs):
-        obj = self.get_object(**kwargs)
-        project = obj.project
-        user = obj.user
-        response = super().post(request, *args, **kwargs)
-        _sync_remove_member(project, user)
-        return response
 
 
 @register_model_view(ProjectUser, "bulk_import", path="import", detail=False)
 class ProjectUserBulkImportView(generic.BulkImportView):
     queryset = ProjectUser.objects.all()
     model_form = forms.ProjectUserImportForm
-
-    def create_and_update_objects(self, form, request):
-        saved_objects = super().create_and_update_objects(form, request)
-        # Sync group membership for each newly created ProjectUser
-        for pu in saved_objects:
-            _sync_add_member(pu.project, pu.user)
-        return saved_objects
 
 
 @register_model_view(ProjectUser, "bulk_edit", path="edit", detail=False)
@@ -306,20 +270,3 @@ class ProjectUserBulkDeleteView(generic.BulkDeleteView):
     queryset = ProjectUser.objects.all()
     filterset = filtersets.ProjectUserFilterSet
     table = tables.ProjectUserTable
-
-    def post(self, request, **kwargs):
-        # Collect project+user pairs before deletion
-        deleted = []
-        if request.POST.get("_all"):
-            qs = self.queryset.model.objects.all()
-            if self.filterset is not None:
-                qs = self.filterset(request.GET, qs, request=request).qs
-            pk_list = qs.only("pk").values_list("pk", flat=True)
-        else:
-            pk_list = [int(pk) for pk in request.POST.getlist("pk")]
-        for pu in self.queryset.filter(pk__in=pk_list):
-            deleted.append((pu.project, pu.user))
-        response = super().post(request, **kwargs)
-        for project, user in deleted:
-            _sync_remove_member(project, user)
-        return response

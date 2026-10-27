@@ -6,7 +6,7 @@ import logging
 from datetime import timedelta
 
 from django.conf import settings
-from django.db.models.signals import post_save, pre_save
+from django.db.models.signals import post_delete, post_save, pre_save
 from django.dispatch import Signal, receiver
 from django.urls import reverse
 from django.utils.translation import gettext_lazy as _
@@ -54,6 +54,31 @@ def on_project_group_changed(sender, instance, **kwargs):
                 old_group.remove_member(pu.user)
         if new_group:
             new_group.add_member(pu.user)
+
+
+@receiver(post_save, sender=ProjectUser)
+def on_project_user_created(sender, instance, created, **kwargs):
+    """Mirror a new project member into the project's group (if any)."""
+    if not created:
+        return
+    group = instance.project.group
+    if group:
+        group.add_member(instance.user)
+
+
+@receiver(post_delete, sender=ProjectUser)
+def on_project_user_deleted(sender, instance, **kwargs):
+    """Remove a departing member from the project's group, unless another
+    project sharing that group still has them as a member."""
+    group = instance.project.group
+    if not group:
+        return
+    still_member = Project.objects.filter(
+        group=group,
+        users__user=instance.user,
+    ).exists()
+    if not still_member:
+        group.remove_member(instance.user)
 
 
 @receiver(post_save, sender=ProjectInvite)
