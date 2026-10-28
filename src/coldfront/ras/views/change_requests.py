@@ -178,6 +178,7 @@ class AllocationChangeRequestView(generic.ObjectView):
             "post_change_data": post,
             "diff_added": diff_added,
             "diff_removed": diff_removed,
+            "will_reactivate": instance.will_reactivate_allocation(),
         }
 
 
@@ -239,6 +240,11 @@ class AllocationChangeRequestDenyView(BaseAllocationChangeRequestFlowView):
 class AllocationChangeRequestApplyView(BaseAllocationChangeRequestFlowView):
     form = forms.AllocationChangeRequestApplyForm
     action = actions.ApplyChange
+
+    def get_extra_context(self, request, instance):
+        context = super().get_extra_context(request, instance)
+        context["will_reactivate"] = instance.will_reactivate_allocation()
+        return context
 
 
 #

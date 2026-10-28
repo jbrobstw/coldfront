@@ -64,6 +64,16 @@
         </c-slot>
     </c-layout.panels>
 
+    {% if will_reactivate %}
+        <c-layout.row>
+            <c-layout.col>
+                <div class="alert alert-warning" role="alert">
+                    {% trans "Applying this change request will re-activate the allocation: because the new end date is in the future, the allocation status will change to Active (via renew → approve → activate)." %}
+                </div>
+            </c-layout.col>
+        </c-layout.row>
+    {% endif %}
+
     {# ---- Proposed Changes Diff ---- #}
     <c-layout.row>
         <c-layout.col>

@@ -121,10 +121,16 @@ class AllocationChangeRequestFlow(ColdFrontFlow):
         3. Apply attribute_changes → merge JSON keys and validate against schema.
         4. Apply extension_changes → call apply_json_change() on each extension.
         5. Save all modified models.
-        6. Set status to "applied".
+        6. Re-activate the allocation via renew → approve → activate if the
+           extension pushes a lapsed allocation's end_date into the future.
+        7. Set status to "applied".
         """
         change_request = self.change_request
         allocation = change_request.allocation
+
+        # Capture whether this apply should re-activate the allocation before
+        # we mutate end_date (the check depends on the current status/end_date).
+        reactivate = change_request.will_reactivate_allocation()
 
         with transaction.atomic():
             # Snapshot the allocation for changelog
@@ -210,6 +216,16 @@ class AllocationChangeRequestFlow(ColdFrontFlow):
 
             # Save the allocation
             allocation.save()
+
+            # Re-activate a lapsed allocation through its full lifecycle so
+            # that status-change side effects (signals, plugin callbacks) fire.
+            if reactivate:
+                from coldfront.ras.flows.allocations import AllocationStatusFlow
+
+                status_flow = AllocationStatusFlow(allocation)
+                status_flow.renew()
+                status_flow.approve()
+                status_flow.activate()
 
     def can_approve(self, user):
         if not self._check_permission_callbacks("approve", self.change_request, user):

@@ -10,7 +10,7 @@ from django.utils.translation import gettext_lazy as _
 from coldfront.models import ColdFrontModel
 from coldfront.models.features import CommentingMixin
 from coldfront.models.fields import AutoSlugField
-from coldfront.ras.choices import AllocationChangeRequestStatusChoices
+from coldfront.ras.choices import AllocationChangeRequestStatusChoices, AllocationStatusChoices
 
 
 class AllocationChangeRequest(CommentingMixin, ColdFrontModel):
@@ -120,6 +120,44 @@ class AllocationChangeRequest(CommentingMixin, ColdFrontModel):
             "Populated during the apply transition. Null for unapplied requests."
         ),
     )
+
+    def projected_end_date(self):
+        """Return the allocation end_date this change request would produce.
+
+        Applies ``extension_days`` to the allocation's current ``end_date``
+        (or to now, if the allocation has no end_date). Returns ``None`` when
+        the request does not change the end_date.
+        """
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        if not self.extension_days:
+            return None
+        if self.allocation.end_date:
+            return self.allocation.end_date + timedelta(days=self.extension_days)
+        return timezone.now() + timedelta(days=self.extension_days)
+
+    def will_reactivate_allocation(self):
+        """Return True if applying this request should re-activate the allocation.
+
+        Applies when the allocation is in a renewable, non-active state
+        (expired, revoked, or denied) and the extension pushes its end_date
+        past the current time.
+        """
+        reactivatable = {
+            AllocationStatusChoices.STATUS_EXPIRED,
+            AllocationStatusChoices.STATUS_REVOKED,
+            AllocationStatusChoices.STATUS_DENIED,
+        }
+        if self.allocation.status not in reactivatable:
+            return False
+        projected = self.projected_end_date()
+        if projected is None:
+            return False
+        from django.utils import timezone
+
+        return projected > timezone.now()
 
     def clean(self):
         super().clean()

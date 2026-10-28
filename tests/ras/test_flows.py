@@ -274,3 +274,69 @@ class AllocationChangeRequestFlowTest(TestCase):
         # Applying should raise an error due to schema validation
         with self.assertRaises(Exception):
             flow.apply()
+
+
+class AllocationChangeRequestReactivationTest(TestCase):
+    """Applying a change request that extends a lapsed allocation's end_date
+    past now should re-activate it through renew → approve → activate."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create(username="reactivate_user")
+        resource_type = ResourceType.objects.create(name="Cluster", slug="cluster")
+        resource = Resource.objects.create(name="Resource 1", slug="r-1", resource_type=resource_type)
+        cls.resource_ct = ContentType.objects.get_for_model(Resource)
+        cls.resource = resource
+        cls.project = Project.objects.create(name="Project 1", owner=cls.user)
+
+    def _make_allocation(self, status, end_offset_days):
+        now = timezone.now()
+        return Allocation.objects.create(
+            justification="Need resources",
+            project=self.project,
+            owner=self.user,
+            resource_object_type=self.resource_ct,
+            resource_object_id=self.resource.pk,
+            status=status,
+            start_date=now - timedelta(days=60),
+            end_date=now + timedelta(days=end_offset_days),
+        )
+
+    def _apply(self, allocation, extension_days):
+        change_request = AllocationChangeRequest.objects.create(
+            allocation=allocation,
+            requested_by=self.user,
+            justification="Extend",
+            extension_days=extension_days,
+        )
+        flow = AllocationChangeRequestFlow(change_request)
+        flow.approve()
+        flow.apply()
+        allocation.refresh_from_db()
+        return change_request
+
+    def test_expired_allocation_reactivated(self):
+        # Expired 10 days ago; extend by 30 → end_date lands in the future.
+        allocation = self._make_allocation(AllocationStatusChoices.STATUS_EXPIRED, -10)
+        self._apply(allocation, 30)
+        self.assertEqual(allocation.status, AllocationStatusChoices.STATUS_ACTIVE)
+        self.assertGreater(allocation.end_date, timezone.now())
+
+    def test_revoked_allocation_reactivated(self):
+        allocation = self._make_allocation(AllocationStatusChoices.STATUS_REVOKED, -10)
+        self._apply(allocation, 30)
+        self.assertEqual(allocation.status, AllocationStatusChoices.STATUS_ACTIVE)
+
+    def test_active_allocation_not_reactivated(self):
+        # Already active — status must remain active, not cycle through renew.
+        allocation = self._make_allocation(AllocationStatusChoices.STATUS_ACTIVE, 10)
+        change_request = self._apply(allocation, 30)
+        self.assertEqual(allocation.status, AllocationStatusChoices.STATUS_ACTIVE)
+        self.assertFalse(change_request.will_reactivate_allocation())
+
+    def test_extension_too_small_does_not_reactivate(self):
+        # Expired 30 days ago; extending by only 10 days keeps end_date in past.
+        allocation = self._make_allocation(AllocationStatusChoices.STATUS_EXPIRED, -30)
+        self._apply(allocation, 10)
+        self.assertEqual(allocation.status, AllocationStatusChoices.STATUS_EXPIRED)
+        self.assertLess(allocation.end_date, timezone.now())

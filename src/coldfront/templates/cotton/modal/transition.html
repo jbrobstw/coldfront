@@ -8,6 +8,11 @@
     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
 </div>
 <div class="modal-body row">
+    {% if will_reactivate %}
+        <div class="alert alert-warning" role="alert">
+            {% trans "Applying this change request extends the end date of a lapsed allocation. The allocation will be re-activated and its status will change to Active." %}
+        </div>
+    {% endif %}
     <form action="{{ request.path }}" method="post" enctype="multipart/form-data" class="mt-5">
         <c-form :form="form" />
         <div class="text-end">
