@@ -36,6 +36,7 @@ class ProjectForm(TenancyForm, OrganizationalModelForm):
             "name",
             "slug",
             "description",
+            "owner",
             "group",
             "tags",
             "tenant",
@@ -48,6 +49,7 @@ class ProjectForm(TenancyForm, OrganizationalModelForm):
             "name",
             "slug",
             "description",
+            "owner",
             "group",
         ),
     )

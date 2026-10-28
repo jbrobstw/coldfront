@@ -59,6 +59,7 @@ class ProjectTestCase(ViewTestCases.OrganizationalObjectViewTestCase):
         cls.form_data = {
             "name": "Project X",
             "description": "A new project",
+            "owner": users[0].pk,
             "tags": [t.pk for t in tags],
         }
 
@@ -86,10 +87,11 @@ class ProjectTestCase(ViewTestCases.OrganizationalObjectViewTestCase):
         """
         tenant = Tenant.objects.create(name="Tenant 1")
 
-        self.add_permissions("ras.add_project")
+        self.add_permissions("ras.add_project", "users.view_user")
         data = {
             "name": "Project X",
             "description": "A new project",
+            "owner": self.user.pk,
             "tenant": tenant.pk,
         }
 

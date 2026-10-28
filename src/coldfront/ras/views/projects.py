@@ -50,7 +50,7 @@ class ProjectEditView(generic.ObjectEditView):
     form = forms.ProjectForm
 
     def alter_object(self, obj, request, url_args, url_kwargs):
-        if not obj.pk:
+        if not obj.pk and obj.owner_id is None:
             obj.owner = request.user
 
         return super().alter_object(obj, request, url_args, url_kwargs)
