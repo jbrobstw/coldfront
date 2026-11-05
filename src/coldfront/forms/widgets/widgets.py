@@ -3,8 +3,39 @@
 #
 # SPDX-License-Identifier: Apache-2.0
 
+import json
+
 from django import forms
 from djmoney.forms.widgets import MoneyWidget
+
+
+class AuthorsWidget(forms.Widget):
+    """
+    Render a list of ``{"name", "orcid"}`` author objects as an interactive
+    "tag list" (text box + add button, with editable/removable rows) instead of
+    a raw JSON textarea.
+
+    The canonical value is kept as a JSON string in a hidden input so the field
+    continues to round-trip the same ``{"name", "orcid"}`` shape used by the
+    provider-import flows. The interactive UI is progressive enhancement: if
+    JavaScript is unavailable, the hidden input still submits whatever value it
+    holds.
+    """
+
+    template_name = "widgets/authors_input.html"
+
+    def get_context(self, name, value, attrs):
+        context = super().get_context(name, value, attrs)
+        authors = value
+        if isinstance(authors, str):
+            try:
+                authors = json.loads(authors) if authors else []
+            except json.JSONDecodeError:
+                authors = []
+        if not isinstance(authors, list):
+            authors = []
+        context["widget"]["authors"] = [a for a in authors if isinstance(a, dict) and a.get("name")]
+        return context
 
 
 class MarkdownWidget(forms.Textarea):

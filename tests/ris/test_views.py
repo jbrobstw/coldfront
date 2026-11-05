@@ -42,7 +42,7 @@ class PublicationViewTestCase(ViewTestCases.PrimaryObjectViewTestCase):
             "title": "A new publication",
             "year": 2024,
             "journal": "Test Journal",
-            "authors": '[{"name": "Jane Doe"}]',
+            "authors": '[{"name": "Jane Doe", "orcid": null}]',
             "projects": [projects[0].pk, projects[1].pk],
         }
 

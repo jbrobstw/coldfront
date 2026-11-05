@@ -1,0 +1,190 @@
+{% load i18n %}
+<div class="authors-widget" id="{{ widget.attrs.id }}-widget" data-authors-widget>
+    {# Canonical value: a JSON string of [{"name", "orcid"}, ...] kept in sync by the script below. #}
+    <input type="hidden" name="{{ widget.name }}" id="{{ widget.attrs.id }}" value="{{ widget.value|default:'[]' }}" data-authors-input>
+
+    {# Initial author data for progressive enhancement. #}
+    {% with data_id=widget.attrs.id|add:"-data" %}{{ widget.authors|json_script:data_id }}{% endwith %}
+
+    <div class="input-group">
+        <input
+            type="text"
+            class="form-control"
+            placeholder="{% trans 'Author name' %}"
+            aria-label="{% trans 'Author name' %}"
+            data-authors-entry
+        >
+        <input
+            type="text"
+            class="form-control"
+            placeholder="{% trans 'ORCID (optional)' %}"
+            aria-label="{% trans 'ORCID' %}"
+            data-authors-orcid-entry
+        >
+        <button type="button" class="btn btn-outline-primary" data-authors-add>
+            <i class="fa-solid fa-plus"></i> {% trans "Add" %}
+        </button>
+    </div>
+
+    <ul class="list-group mt-2" data-authors-list></ul>
+</div>
+
+<script>
+    (function () {
+        const root = document.getElementById('{{ widget.attrs.id }}-widget');
+        if (!root) return;
+
+        const hidden = root.querySelector('[data-authors-input]');
+        const entry = root.querySelector('[data-authors-entry]');
+        const orcidEntry = root.querySelector('[data-authors-orcid-entry]');
+        const addBtn = root.querySelector('[data-authors-add]');
+        const list = root.querySelector('[data-authors-list]');
+        const dataEl = document.getElementById(hidden.id + '-data');
+
+        let authors = [];
+        try {
+            authors = JSON.parse(dataEl.textContent) || [];
+        } catch (e) {
+            authors = [];
+        }
+        if (!Array.isArray(authors)) authors = [];
+
+        function sync() {
+            hidden.value = JSON.stringify(authors);
+        }
+
+        function render() {
+            list.textContent = '';
+            authors.forEach(function (author, index) {
+                const item = document.createElement('li');
+                item.className = 'list-group-item d-flex justify-content-between align-items-center';
+
+                const info = document.createElement('div');
+                info.className = 'author-info flex-grow-1 me-2';
+
+                const name = document.createElement('span');
+                name.className = 'author-name';
+                name.textContent = author.name;
+                info.appendChild(name);
+
+                if (author.orcid) {
+                    const orcid = document.createElement('span');
+                    orcid.className = 'author-orcid text-body-secondary small ms-2';
+                    orcid.textContent = author.orcid;
+                    info.appendChild(orcid);
+                }
+
+                const group = document.createElement('div');
+                group.className = 'btn-group btn-group-sm';
+
+                const editBtn = document.createElement('button');
+                editBtn.type = 'button';
+                editBtn.className = 'btn btn-outline-secondary';
+                editBtn.title = '{% trans "Edit" %}';
+                editBtn.innerHTML = '<i class="fa-solid fa-pen"></i>';
+                editBtn.addEventListener('click', function () {
+                    startEdit(item, info, index);
+                });
+
+                const delBtn = document.createElement('button');
+                delBtn.type = 'button';
+                delBtn.className = 'btn btn-outline-danger';
+                delBtn.title = '{% trans "Remove" %}';
+                delBtn.innerHTML = '<i class="fa-solid fa-trash"></i>';
+                delBtn.addEventListener('click', function () {
+                    authors.splice(index, 1);
+                    sync();
+                    render();
+                });
+
+                group.appendChild(editBtn);
+                group.appendChild(delBtn);
+                item.appendChild(info);
+                item.appendChild(group);
+                list.appendChild(item);
+            });
+        }
+
+        function startEdit(item, info, index) {
+            const editor = document.createElement('div');
+            editor.className = 'input-group input-group-sm author-edit flex-grow-1 me-2';
+
+            const nameInput = document.createElement('input');
+            nameInput.type = 'text';
+            nameInput.className = 'form-control';
+            nameInput.placeholder = '{% trans "Author name" %}';
+            nameInput.value = authors[index].name;
+
+            const orcidInput = document.createElement('input');
+            orcidInput.type = 'text';
+            orcidInput.className = 'form-control';
+            orcidInput.placeholder = '{% trans "ORCID (optional)" %}';
+            orcidInput.value = authors[index].orcid || '';
+
+            editor.appendChild(nameInput);
+            editor.appendChild(orcidInput);
+
+            let committed = false;
+            function commit() {
+                if (committed) return;
+                committed = true;
+                const name = nameInput.value.trim();
+                if (name) {
+                    authors[index].name = name;
+                    authors[index].orcid = orcidInput.value.trim() || null;
+                    sync();
+                }
+                render();
+            }
+
+            function onKeydown(e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    commit();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    committed = true;
+                    render();
+                }
+            }
+            function onBlur() {
+                // Defer so focus can move between the two inputs without committing.
+                setTimeout(function () {
+                    if (!editor.contains(document.activeElement)) commit();
+                }, 0);
+            }
+
+            [nameInput, orcidInput].forEach(function (el) {
+                el.addEventListener('keydown', onKeydown);
+                el.addEventListener('blur', onBlur);
+            });
+
+            item.replaceChild(editor, info);
+            nameInput.focus();
+        }
+
+        function addAuthor() {
+            const name = entry.value.trim();
+            if (!name) return;
+            authors.push({ name: name, orcid: orcidEntry.value.trim() || null });
+            entry.value = '';
+            orcidEntry.value = '';
+            sync();
+            render();
+            entry.focus();
+        }
+
+        addBtn.addEventListener('click', addAuthor);
+        [entry, orcidEntry].forEach(function (el) {
+            el.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addAuthor();
+                }
+            });
+        });
+
+        sync();
+        render();
+    })();
+</script>

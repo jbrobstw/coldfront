@@ -125,6 +125,53 @@ class JSONField(_JSONField):
         return json.dumps(value, sort_keys=True, indent=4, ensure_ascii=False, cls=self.encoder)
 
 
+class AuthorsField(forms.Field):
+    """
+    A form field for editing a publication's authors as a list of
+    ``{"name", "orcid"}`` objects via an interactive tag-list UI.
+
+    The underlying widget submits the value as a JSON string. Only the author
+    names are editable in the UI; any existing ``orcid`` value is preserved, and
+    newly added authors get ``orcid: null`` so the stored shape stays consistent
+    with the provider-import flows.
+    """
+
+    widget = widgets.AuthorsWidget
+
+    def prepare_value(self, value):
+        if isinstance(value, str):
+            return value
+        return json.dumps(value or [], ensure_ascii=False)
+
+    def to_python(self, value):
+        if value in self.empty_values:
+            return []
+        if isinstance(value, list):
+            authors = value
+        else:
+            try:
+                authors = json.loads(value)
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise forms.ValidationError(_("Enter a valid list of authors."), code="invalid") from exc
+
+        if not isinstance(authors, list):
+            raise forms.ValidationError(_("Enter a valid list of authors."), code="invalid")
+
+        cleaned = []
+        for author in authors:
+            if isinstance(author, dict):
+                name = (author.get("name") or "").strip()
+                orcid = author.get("orcid") or None
+            elif isinstance(author, str):
+                name = author.strip()
+                orcid = None
+            else:
+                continue
+            if name:
+                cleaned.append({"name": name, "orcid": orcid})
+        return cleaned
+
+
 class CommentField(forms.CharField):
     """
     A textarea with support for Markdown rendering.

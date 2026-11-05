@@ -7,7 +7,7 @@ from django import forms
 from django.utils.translation import gettext_lazy as _
 
 from coldfront.forms import ColdFrontModelForm
-from coldfront.forms.fields import MoneyField
+from coldfront.forms.fields import AuthorsField, MoneyField
 from coldfront.ras.models import Project
 from coldfront.ris.models import Funding, Publication
 
@@ -15,6 +15,11 @@ __all__ = ("FundingForm", "PublicationForm")
 
 
 class PublicationForm(ColdFrontModelForm):
+    authors = AuthorsField(
+        required=False,
+        label=_("Authors"),
+        help_text=_("Add one author at a time. Type a name and click Add."),
+    )
     projects = forms.ModelMultipleChoiceField(
         queryset=Project.objects.all(),
         required=True,
