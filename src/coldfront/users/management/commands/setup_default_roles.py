@@ -118,6 +118,19 @@ PERMISSIONS = {
         "actions": ["view", "add", "request"],
         "constraints": [CR_PROJECT_OWNER, CR_PROJECT_MEMBER],
     },
+    # -- Research works (publications/funding) --------------------------------
+    "write:add/team/publication": {
+        "description": _("Add publications to projects you own or belong to"),
+        "object_types": [("ris", "publication")],
+        "actions": ["view", "add"],
+        "constraints": None,
+    },
+    "write:add/team/funding": {
+        "description": _("Add funding to projects you own or belong to"),
+        "object_types": [("ris", "funding")],
+        "actions": ["view", "add"],
+        "constraints": None,
+    },
     # -- Comments (collaboration on your own projects/allocations) ------------
     "write:add/team/commententry": {
         "description": _("Add comments on objects you own or collaborate on"),
@@ -241,6 +254,12 @@ PERMISSIONS = {
         "actions": ["view", "add"],
         "constraints": None,
     },
+    "write/all/researchwork": {
+        "description": _("Manage all publications and funding records"),
+        "object_types": [("ris", "publication"), ("ris", "funding")],
+        "actions": ["view", "add", "change", "delete"],
+        "constraints": None,
+    },
 }
 
 
@@ -260,6 +279,8 @@ ROLES = {
             "write:request/self/allocationchangerequest",
             "read/team/slurmassociation",
             "read/team/storagequota",
+            "write:add/team/publication",
+            "write:add/team/funding",
             "write:add/team/commententry",
             "write:edit/self/commententry",
         ],
@@ -274,6 +295,8 @@ ROLES = {
             "write:request/team/allocationchangerequest",
             "read/team/slurmassociation",
             "read/team/storagequota",
+            "write:add/team/publication",
+            "write:add/team/funding",
             "write:add/team/commententry",
             "write:edit/self/commententry",
         ],
@@ -303,6 +326,7 @@ ROLES = {
             "write/all/resource",
             "write/all/slurm",
             "write/all/storage",
+            "write/all/researchwork",
             "write:add/all/commententry",
             "write:edit/self/commententry",
         ],
