@@ -140,11 +140,11 @@ class ProjectPublicationTabViewTestCase(ColdFrontTestCase):
     def test_extra_controls_requires_permission(self):
         response = self.client.get(reverse("ras:project_publications", kwargs={"pk": self.project.pk}))
         self.assertEqual(response.status_code, 200)
-        # Without ras.change_project the Add Publication button is hidden.
+        # Without ris.add_publication the Add Publication button is hidden.
         self.assertNotContains(response, "Add Publication")
 
     def test_extra_controls_with_permission(self):
-        self.add_permissions("ras.change_project")
+        self.add_permissions("ris.add_publication")
         response = self.client.get(reverse("ras:project_publications", kwargs={"pk": self.project.pk}))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Add Publication")
@@ -185,7 +185,7 @@ class ProjectFundingTabViewTestCase(ColdFrontTestCase):
         self.assertNotContains(response, "Add Funding")
 
     def test_extra_controls_with_permission(self):
-        self.add_permissions("ras.change_project")
+        self.add_permissions("ris.add_funding")
         response = self.client.get(reverse("ras:project_funding", kwargs={"pk": self.project.pk}))
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "Add Funding")
@@ -308,7 +308,7 @@ class ProjectFundingBulkUnlinkViewTestCase(ColdFrontTestCase):
 
 
 class ProjectAddPublicationViewTestCase(ColdFrontTestCase):
-    user_permissions = ("ras.change_project", "ras.view_project", "ris.view_publication")
+    user_permissions = ("ris.add_publication", "ras.view_project", "ris.view_publication")
 
     def setUp(self):
         super().setUp()
@@ -545,7 +545,7 @@ class ProjectAddPublicationViewTestCase(ColdFrontTestCase):
 
 
 class ProjectAddFundingViewTestCase(ColdFrontTestCase):
-    user_permissions = ("ras.change_project", "ras.view_project", "ris.view_funding")
+    user_permissions = ("ris.add_funding", "ras.view_project", "ris.view_funding")
 
     def setUp(self):
         super().setUp()

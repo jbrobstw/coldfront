@@ -2,7 +2,7 @@
 {% load i18n %}
 
 {% block extra_controls %}
-    {% if perms.ras.change_project %}
+    {% if perms.ris.add_funding %}
         <a
             href="{% url 'ras:project_add_funding' pk=object.pk %}?return_url={% url 'ras:project_funding' pk=object.pk %}"
             class="btn btn-primary"

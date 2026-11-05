@@ -16,7 +16,6 @@ from coldfront.registry import register_model_view
 from coldfront.ris import filtersets, forms, tables
 from coldfront.ris.models import Funding, Publication
 from coldfront.ris.providers.local import LocalProvider
-from coldfront.users.permissions import get_permission_for_model
 from coldfront.views import ViewTab, generic
 from coldfront.views.generic.base import BaseObjectView
 from coldfront.views.htmx import htmx_partial
@@ -320,7 +319,10 @@ class ProjectAddResearchWorkView(BaseObjectView):
     """
 
     queryset = Project.objects.all()
-    permission_action = "change"
+    # Model-level permission gating the view (e.g. ``ris.add_publication``). The
+    # queryset is still scoped to projects the user may ``view`` so a user can
+    # add research works to any project they have access to.
+    required_permission = None
     model = None
     key_fields = ()
     filterset_form = None
@@ -330,7 +332,16 @@ class ProjectAddResearchWorkView(BaseObjectView):
     model_label = "records"
 
     def get_required_permission(self):
-        return get_permission_for_model(Project, self.permission_action)
+        return self.required_permission
+
+    def has_permission(self):
+        user = self.request.user
+        if user.has_perms((self.get_required_permission(), *self.additional_permissions)):
+            # Restrict to projects the user may view rather than by the action of
+            # the required permission, which targets the research-work model.
+            self.queryset = self.queryset.restrict(user, "view")
+            return True
+        return False
 
     def get(self, request, **kwargs):
         project = self.get_object(**kwargs)
@@ -541,10 +552,11 @@ class ProjectAddResearchWorkView(BaseObjectView):
 class ProjectAddPublicationView(ProjectAddResearchWorkView):
     """
     Link publications to a project from local records, the user's linked ORCID
-    record, and Crossref search results. Requires the ``ras.change_project``
+    record, and Crossref search results. Requires the ``ris.add_publication``
     permission.
     """
 
+    required_permission = "ris.add_publication"
     template_name = "ris/publication_add.html"
     model = Publication
     key_fields = ("doi",)
@@ -585,10 +597,11 @@ class ProjectAddPublicationView(ProjectAddResearchWorkView):
 class ProjectAddFundingView(ProjectAddResearchWorkView):
     """
     Link funding to a project from local records, the user's linked ORCID
-    record, and NSF Awards search results. Requires the ``ras.change_project``
+    record, and NSF Awards search results. Requires the ``ris.add_funding``
     permission.
     """
 
+    required_permission = "ris.add_funding"
     template_name = "ris/funding_add.html"
     model = Funding
     key_fields = ("award_number", "funding_agency")
