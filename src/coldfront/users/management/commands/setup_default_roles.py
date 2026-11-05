@@ -62,6 +62,11 @@ CR_PROJECT_MEMBER = {"allocation__project__users__user": "$user"}
 EXT_PROJECT_OWNER = {"allocation__project__owner": "$user"}
 EXT_PROJECT_MEMBER = {"allocation__project__users__user": "$user"}
 
+# Research works (publications/funding) reach the project through their
+# ``projects`` many-to-many relation.
+RW_PROJECT_OWNER = {"projects__owner": "$user"}
+RW_PROJECT_MEMBER = {"projects__users__user": "$user"}
+
 
 # Permission catalog -----------------------------------------------------------
 #
@@ -119,16 +124,34 @@ PERMISSIONS = {
         "constraints": [CR_PROJECT_OWNER, CR_PROJECT_MEMBER],
     },
     # -- Research works (publications/funding) --------------------------------
+    #
+    # ``add`` is unconstrained at the model level: the add/link view gates on
+    # the model-level ``ris.add_*`` permission and scopes the target to
+    # projects the user may view, so the research-work queryset itself needs no
+    # constraint. ``view`` is scoped separately so the Publications/Funding
+    # tabs only surface records linked to projects the user owns or belongs to.
+    "read/team/publication": {
+        "description": _("View publications linked to projects you own or belong to"),
+        "object_types": [("ris", "publication")],
+        "actions": ["view"],
+        "constraints": [RW_PROJECT_OWNER, RW_PROJECT_MEMBER],
+    },
+    "read/team/funding": {
+        "description": _("View funding linked to projects you own or belong to"),
+        "object_types": [("ris", "funding")],
+        "actions": ["view"],
+        "constraints": [RW_PROJECT_OWNER, RW_PROJECT_MEMBER],
+    },
     "write:add/team/publication": {
         "description": _("Add publications to projects you own or belong to"),
         "object_types": [("ris", "publication")],
-        "actions": ["view", "add"],
+        "actions": ["add"],
         "constraints": None,
     },
     "write:add/team/funding": {
         "description": _("Add funding to projects you own or belong to"),
         "object_types": [("ris", "funding")],
-        "actions": ["view", "add"],
+        "actions": ["add"],
         "constraints": None,
     },
     # -- Comments (collaboration on your own projects/allocations) ------------
@@ -279,6 +302,8 @@ ROLES = {
             "write:request/self/allocationchangerequest",
             "read/team/slurmassociation",
             "read/team/storagequota",
+            "read/team/publication",
+            "read/team/funding",
             "write:add/team/publication",
             "write:add/team/funding",
             "write:add/team/commententry",
@@ -295,6 +320,8 @@ ROLES = {
             "write:request/team/allocationchangerequest",
             "read/team/slurmassociation",
             "read/team/storagequota",
+            "read/team/publication",
+            "read/team/funding",
             "write:add/team/publication",
             "write:add/team/funding",
             "write:add/team/commententry",
@@ -311,6 +338,8 @@ ROLES = {
             "read/team/allocationchangerequest",
             "read/team/slurmassociation",
             "read/team/storagequota",
+            "read/team/publication",
+            "read/team/funding",
             "write:add/team/commententry",
             "write:edit/self/commententry",
         ],
