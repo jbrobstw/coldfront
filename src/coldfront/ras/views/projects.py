@@ -11,6 +11,7 @@ from coldfront.forms import BulkDeleteForm
 from coldfront.ras import filtersets, forms, tables
 from coldfront.ras.models import Allocation, Project, ProjectUser
 from coldfront.registry import register_model_view
+from coldfront.users.models import User
 from coldfront.users.permissions import get_permission_for_model
 from coldfront.utils.query import count_related
 from coldfront.views import ViewTab, generic
@@ -54,6 +55,13 @@ class ProjectEditView(generic.ObjectEditView):
             obj.owner = request.user
 
         return super().alter_object(obj, request, url_args, url_kwargs)
+
+    def alter_form(self, form, request, obj):
+        # restrict_form_fields() narrows the owner choices to users the requester may view,
+        # which can exclude the project's current owner. Keep it selectable so PIs can save.
+        owner_field = form.fields.get("owner")
+        if owner_field is not None and obj.owner_id is not None:
+            owner_field.queryset = (owner_field.queryset | User.objects.filter(pk=obj.owner_id)).distinct()
 
 
 @register_model_view(Project, "delete")
