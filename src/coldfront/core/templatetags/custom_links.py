@@ -73,8 +73,8 @@ def custom_links(context, obj):
                     )
             except Exception as e:
                 template_code += (
-                    f'<a class="btn btn-sm btn-outline-secondary" disabled="disabled" title="{e}">'
-                    f'<i class="fa-solid fa-triangle-exclamation"></i> {cl.name}</a>\n'
+                    f'<a class="btn btn-sm btn-outline-secondary" disabled="disabled" title="{escape(e)}">'
+                    f'<i class="fa-solid fa-triangle-exclamation"></i> {escape(cl.name)}</a>\n'
                 )
 
     # Add grouped links to template
@@ -89,8 +89,8 @@ def custom_links(context, obj):
                     )
             except Exception as e:
                 links_rendered.append(
-                    f'<li><a class="dropdown-item" disabled="disabled" title="{e}">'
-                    f'<span class="text-muted"><i class="fa-solid fa-triangle-exclamation"></i> {cl.name}</span></a></li>'
+                    f'<li><a class="dropdown-item" disabled="disabled" title="{escape(e)}">'
+                    f'<span class="text-muted"><i class="fa-solid fa-triangle-exclamation"></i> {escape(cl.name)}</span></a></li>'
                 )
 
         if links_rendered:
