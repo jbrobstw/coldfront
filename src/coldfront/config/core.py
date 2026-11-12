@@ -214,6 +214,11 @@ REST_FRAMEWORK = {
         "coldfront.api.renderers.FormlessBrowsableAPIRenderer",
     ),
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
+    "DEFAULT_THROTTLE_CLASSES": ("rest_framework.throttling.ScopedRateThrottle",),
+    "DEFAULT_THROTTLE_RATES": {
+        # Rate-limit unauthenticated token provisioning to deter credential stuffing.
+        "token_provision": ENV.str("TOKEN_PROVISION_THROTTLE_RATE", default="10/hour"),
+    },
     "DEFAULT_VERSION": REST_FRAMEWORK_VERSION,
     "DEFAULT_VERSIONING_CLASS": "rest_framework.versioning.AcceptHeaderVersioning",
     "SCHEMA_COERCE_METHOD_NAMES": {

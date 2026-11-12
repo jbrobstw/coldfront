@@ -97,6 +97,8 @@ class TokenProvisionView(APIView):
     """
 
     permission_classes = []
+    # Rate-limit this unauthenticated credential-checking endpoint (see DEFAULT_THROTTLE_RATES).
+    throttle_scope = "token_provision"
 
     @extend_schema(
         request=serializers.TokenProvisionSerializer,

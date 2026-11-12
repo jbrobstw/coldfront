@@ -272,6 +272,8 @@ class TokenTest(
         self.assertEqual(token.key, response.data["key"])
         self.assertEqual(token.enabled, response.data["enabled"])
         self.assertEqual(token.write_enabled, response.data["write_enabled"])
+        # Tokens minted via the unauthenticated provisioning endpoint must never be write-enabled.
+        self.assertFalse(token.write_enabled)
 
     def test_provision_token_invalid(self):
         """

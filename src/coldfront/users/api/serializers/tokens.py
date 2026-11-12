@@ -105,4 +105,8 @@ class TokenProvisionSerializer(TokenSerializer):
         # Inject the user into the validated data
         data["user"] = user
 
+        # This endpoint is unauthenticated (password only); never let the caller mint a
+        # write-enabled token through it. Writable tokens must be created via the authenticated API.
+        data["write_enabled"] = False
+
         return data
