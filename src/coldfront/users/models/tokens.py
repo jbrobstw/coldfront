@@ -209,4 +209,5 @@ class Token(models.Model):
             # Invalid pepper ID
             return False
         digest = hmac.new(pepper.encode("utf-8"), token.encode("utf-8"), hashlib.sha256).hexdigest()
-        return digest == self.hmac_digest
+        # Compare in constant time to avoid leaking the digest via timing side channels.
+        return hmac.compare_digest(digest, self.hmac_digest)
