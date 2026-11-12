@@ -5,6 +5,7 @@
 
 from django.db.models import Sum
 from django.http import HttpResponse
+from django.utils.http import content_disposition_header
 from django.utils.translation import gettext_lazy as _
 
 from coldfront.ras.models import Allocation
@@ -165,7 +166,7 @@ class SlurmClusterDumpView(generic.ObjectView):
             dump_content = generate_cluster_dump(instance)
             response = HttpResponse(dump_content, content_type="text/plain")
             filename = f"slurm_dump_{instance.name}.txt"
-            response["Content-Disposition"] = f"attachment; filename={filename}"
+            response["Content-Disposition"] = content_disposition_header(as_attachment=True, filename=filename)
             return response
         return super().get(request, *args, **kwargs)
 

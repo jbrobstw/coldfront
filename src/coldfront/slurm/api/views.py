@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from django.http import HttpResponse
+from django.utils.http import content_disposition_header
 from rest_framework.decorators import action
 from rest_framework.routers import APIRootView
 
@@ -50,7 +51,7 @@ class SlurmClusterViewSet(ColdFrontModelViewSet):
         dump_content = generate_cluster_dump(cluster)
         response = HttpResponse(dump_content, content_type="text/plain")
         filename = f"slurm_dump_{cluster.name}.txt"
-        response["Content-Disposition"] = f"attachment; filename={filename}"
+        response["Content-Disposition"] = content_disposition_header(as_attachment=True, filename=filename)
         return response
 
 
