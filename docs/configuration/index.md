@@ -91,6 +91,112 @@ These settings are defined in `src/coldfront/config/auth.py`.
 | `REMOTE_AUTH_USER_FIRST_NAME` | `HTTP_REMOTE_USER_FIRST_NAME` | Header for first name |
 | `REMOTE_AUTH_USER_LAST_NAME` | `HTTP_REMOTE_USER_LAST_NAME` | Header for last name |
 
+!!! danger "The reverse proxy **must** strip these headers from inbound requests"
+
+    When `REMOTE_AUTH_ENABLED` is `True`, ColdFront trusts the identity,
+    group, email, and name headers listed above *implicitly*. It has no way to
+    distinguish a header set by your authenticating reverse proxy from one sent
+    by the client. If the proxy forwards client-supplied copies of these
+    headers, an unauthenticated attacker can spoof **any** username and group
+    membership simply by adding the headers to their request — and because
+    `REMOTE_AUTH_SUPERUSER_GROUPS` grants superuser status by group name, this
+    is a direct path to full administrative takeover.
+
+    The proxy **must unset/clear every one of these headers on the inbound
+    request** and then set only the values it has itself authenticated. This
+    includes the group header (`REMOTE_AUTH_GROUP_HEADER`), the email and name
+    headers, and the identity header (`REMOTE_AUTH_HEADER`) itself.
+
+    Remember that HTTP header names are case-insensitive and that `-` and `_`
+    are interchangeable to many proxies: `Remote-User`, `REMOTE_USER`, and
+    `remote-user` are all the same header to ColdFront. Clear all variants.
+
+    The examples below assume the default header names
+    (`REMOTE_USER`, `REMOTE_USER_GROUP`, `REMOTE_USER_EMAIL`,
+    `REMOTE_USER_FIRST_NAME`, `REMOTE_USER_LAST_NAME`). Adjust them if you have
+    overridden the `REMOTE_AUTH_*` header settings.
+
+#### Apache (`mod_proxy` + an auth module)
+
+Unset any client-supplied copies *before* the authentication module runs, then
+let the auth module (e.g. `mod_auth_openidc`, `mod_shib`, Kerberos) set the
+trusted value:
+
+```apache
+<Location "/">
+    # 1. Strip anything the client might have sent. RequestHeader unset
+    #    removes the header from the request before it is proxied upstream.
+    RequestHeader unset Remote-User
+    RequestHeader unset Remote-User-Group
+    RequestHeader unset Remote-User-Email
+    RequestHeader unset Remote-User-First-Name
+    RequestHeader unset Remote-User-Last-Name
+
+    # 2. Authenticate the request (example: mod_auth_openidc).
+    AuthType openid-connect
+    Require valid-user
+
+    # 3. Set the trusted headers from values Apache itself authenticated.
+    RequestHeader set Remote-User "%{REMOTE_USER}e"
+    RequestHeader set Remote-User-Email "%{OIDC_CLAIM_email}e"
+    RequestHeader set Remote-User-First-Name "%{OIDC_CLAIM_given_name}e"
+    RequestHeader set Remote-User-Last-Name "%{OIDC_CLAIM_family_name}e"
+    # Join authenticated groups with the REMOTE_AUTH_GROUP_SEPARATOR ("|").
+    RequestHeader set Remote-User-Group "%{OIDC_CLAIM_groups}e"
+
+    ProxyPass        http://127.0.0.1:8000/
+    ProxyPassReverse http://127.0.0.1:8000/
+</Location>
+```
+
+!!! note
+
+    `RequestHeader set` runs late in request processing, so it always wins over
+    a client-supplied value even without the explicit `unset`. The `unset`
+    lines are kept as defense-in-depth and to cover headers you do not set
+    yourself (for example, if group sync is disabled but a client sends a group
+    header anyway).
+
+#### nginx (`proxy_pass`)
+
+In nginx, a request header named `Foo-Bar` arrives as the variable
+`$http_foo_bar`. Clear every inbound variant and then pass only the values your
+auth layer (e.g. `auth_request`, an OIDC/SAML subrequest, or an upstream SSO
+proxy) produced:
+
+```nginx
+location / {
+    # 1. Clear any client-supplied copies. Setting a proxy header to the empty
+    #    string prevents it (and the matching $http_* value) from being
+    #    forwarded upstream.
+    proxy_set_header Remote-User            "";
+    proxy_set_header Remote-User-Group      "";
+    proxy_set_header Remote-User-Email      "";
+    proxy_set_header Remote-User-First-Name "";
+    proxy_set_header Remote-User-Last-Name  "";
+
+    # 2. Set the trusted headers from variables your auth layer populated.
+    #    These examples assume an auth_request subrequest exposed the values
+    #    via $upstream_http_* / mapped variables.
+    proxy_set_header Remote-User            $authenticated_user;
+    proxy_set_header Remote-User-Email      $authenticated_email;
+    proxy_set_header Remote-User-First-Name $authenticated_first_name;
+    proxy_set_header Remote-User-Last-Name  $authenticated_last_name;
+    # Join authenticated groups with the REMOTE_AUTH_GROUP_SEPARATOR ("|").
+    proxy_set_header Remote-User-Group      $authenticated_groups;
+
+    proxy_pass http://127.0.0.1:8000;
+}
+```
+
+!!! warning
+
+    Do **not** rely on `underscores_in_headers on;` or on nginx's default of
+    dropping underscore headers as your only defense. The identity headers use
+    hyphens by default, and a `proxy_set_header ... "";` for each header is the
+    reliable way to guarantee the client cannot inject a value. Always set the
+    authenticated value explicitly as shown above.
+
 ### LDAP Authentication
 
 | Variable | Default | Description |
