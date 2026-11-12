@@ -40,6 +40,19 @@ SESSION_SAVE_EVERY_REQUEST = True
 SESSION_COOKIE_SAMESITE = "Strict"
 SESSION_COOKIE_SECURE = True
 
+# CSRF cookie hardening (mirrors the session cookie settings above).
+CSRF_COOKIE_SECURE = True
+CSRF_COOKIE_SAMESITE = "Strict"
+
+# Transport/content security headers. Defaults are safe for a TLS deployment and
+# can be relaxed via environment for local/non-HTTPS development.
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = ENV.str("SECURE_REFERRER_POLICY", default="same-origin")
+SECURE_SSL_REDIRECT = ENV.bool("SECURE_SSL_REDIRECT", default=not DEBUG)
+SECURE_HSTS_SECONDS = ENV.int("SECURE_HSTS_SECONDS", default=0 if DEBUG else 31536000)
+SECURE_HSTS_INCLUDE_SUBDOMAINS = ENV.bool("SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True)
+SECURE_HSTS_PRELOAD = ENV.bool("SECURE_HSTS_PRELOAD", default=True)
+
 API_TOKEN_PEPPERS = ENV.dict("API_TOKEN_PEPPERS", default={})
 
 # Validate API token peppers
